@@ -1,6 +1,6 @@
 Amorphous Polymer Generation
 ============================
 
-.. automodule:: generation.ipp.amorphous
+.. automodule:: generation.pp.amorphous
    :members:
 

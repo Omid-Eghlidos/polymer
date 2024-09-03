@@ -4,7 +4,7 @@ Introduction to Polymer
 The Polymer project is a toolkit designed to assist in the generation and
 analysis of polymer structures.
 This project includes tools for generating both amorphous and crystalline
-structures for polymers like isotactic polypropylene (iPP) and polyethylene (PE).
+structures for polymers like polyethylene (PE) and polypropylene (PP).
 
 The aim of this project is to provide users with the ability to:
 

@@ -126,7 +126,7 @@ class PPAmorphousSystem(PolymerSystem):
             # Each chain has an initiator and a terminator
             # Types of different forcefield atoms in the system
             self.forcefield_atom_types = dict(C1=0, C2=1, C3=2, H=3)
-            # Bond-angles of iPP in rad (degrees) (Antoniadis, 1998)
+            # Bond-angles of PP in rad (degrees) (Antoniadis, 1998)
             # R-C-C (C3C1C2) = C-C-R (C2C1C3) = 1.9465 rad = 111.5262 deg
             # aC-C-C (C1C2C1) = 1.8778 rad = 107.5900 deg
             # cC-C-C (C2C1C2) = 1.9380 rad = 111.0392 deg

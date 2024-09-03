@@ -11,7 +11,7 @@ for two force fields:
 
 Supported materials:
     - Polyethylene (PE)
-    - Isotactic Polypropylene (iPP)
+    - Polypropylene (PP)
 
 Functions
 ---------

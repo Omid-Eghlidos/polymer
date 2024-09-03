@@ -115,7 +115,7 @@ def amorphous_system(material, Ns, Nc, Nm, potential_coeffs='compass',
             system = PPAmorphousSystem(Nc, Nm, random_variation)
         output = f'{material}_{Nm}m{Nc}c_{ns+1:02d}.lammps'
         coeffs = potential_coefficients(material, potential_coeffs)
-        write_data_file(output, system, output_format, coeffs)
+        write_data_file(output, system, atoms_format, coeffs)
 
         if screen:
             # Show the system properties on the screen

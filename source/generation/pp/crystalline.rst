@@ -1,6 +1,6 @@
 Crystalline Polymer Generation
 ==============================
 
-.. automodule:: generation.ipp.crystalline
+.. automodule:: generation.pp.crystalline
    :members:
 
