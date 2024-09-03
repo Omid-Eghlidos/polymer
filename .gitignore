@@ -1,0 +1,17 @@
+# Ignored file patterns
+#
+# Compiled Python bytecode
+*.py[cod]
+
+# Results 
+# Folders
+build/
+
+# Files
+*.lammps
+*.lammpstrj
+*.png
+*.tga
+*.pdf
+*.html
+
