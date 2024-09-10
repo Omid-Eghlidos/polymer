@@ -27,17 +27,21 @@ crystal_system(material, Ns, Na, Nb, Nc, potential_coeffs='compass',
 """
 
 from generation.pe.amorphous.system import PEAmorphousSystem
+from generation.pe.crystalline.system import PECrystallineSystem
 from generation.pp.amorphous.system import PPAmorphousSystem
+from generation.pp.crystalline.system import PPCrystallineSystem
 from generation.lib.potential_coefficients import potential_coefficients
 from generation.lib.lammps import write_data_file
+from generation.cg.system import BeadSpringSystem
+from generation.cg.lammps import write_data
 
 
-def generate(material, phase, settings):
+def generate(material, phase, resolution, settings, verbose=True):
     """
     Generate a specified polymer system based on the given settings.
 
-    Parameters
-    ----------
+    Parameters:
+    -----------
     material : str
         Type of polymer system to generate ('PE' or 'PP').
     phase : str
@@ -45,106 +49,126 @@ def generate(material, phase, settings):
     settings : dict
         Configuration settings for the polymer system.
 
-    Returns
-    -------
-    PEAmorphousSystem or PPAmorphousSystem
-        The generated polymer system instance.
+    Returns:
+    --------
+    system : obj
+        The generated polymer system instance including PEAmorphousSystem or
+        PECrystallineSystem or PPAmorphousSystem or PPCrystallineSystem or BeadSpringSystem
 
-    Notes
-    -----
-    This function generates the specified polymer system and writes it to a file.
+    Notes:
+    ------
+    This function generates the specified polymer system and writes it to a
+    LAMMPS-format data file in the specified atom format.
     """
-    if material == 'PE':
-        if phase == 'amorphous':
-            system = amorphous_system(material, **settings)
-        elif phase == 'crystalline':
-            system = crystalline_system(**settings)
+
+    if phase in ['Amorphous', 'amorphous']:
+        if resolution in ['AA', 'Aa', 'aa']:
+            system = amorphous_aa_system(material, settings.copy(), verbose)
+        elif resolution in ['CG', 'Cg', 'cg']:
+            system = amorphous_cg_system(material, settings.copy(), verbose)
         else:
-            raise ValueError('Invalid phase for PE.')
-    elif material == 'PP':
-        if phase == 'amorphous':
-            system = amorphous_system(material, **settings)
-        elif phase == 'crystalline':
-            system = crystalline_system(**settings)
-        else:
-            raise ValueError('Invalid phase for PP.')
+            raise ValueError('Invalid resolution: {resolution}')
+    elif phase in ['Crystalline', 'crystalline']:
+        if resolution in ['AA', 'Aa', 'aa']:
+            system = crystalline_aa_system(material, settings.copy(), verbose)
+        elif resolution in ['CG', 'Cg', 'cg']:
+            system = crystalline_cg_system(material, settings.copy(), verbose)
     else:
-        raise ValueError('Invalid material.')
+        raise ValueError('Invalid phase: {phase}')
 
 
-def amorphous_system(material, Ns, Nc, Nm, potential_coeffs='compass',
-                     atoms_format='full', random_variation=True, screen=True):
+def amorphous_aa_system(material, settings, verbose):
     """
-    Generate an amorphous polymer system and save it to a LAMMPS data file.
+    Generate an all-atomistic (AA) amorphous polymer system and save it to a
+    LAMMPS data file.
 
-    Parameters
-    ----------
+    Parameters:
+    -----------
     material : str
         Type of polymer system to generate ('PE' or 'PP').
-    Ns : int
-        Number of systems to generate.
-    Nc : int
-        Number of chains per system.
-    Nm : int
-        Number of monomers per chain.
-    potential_coeffs : dict
-        Potential coefficients for forcefield (e.g., COMPASS or PCFF).
-    atoms_format : str
-        LAMMPS atom format to write the molecular structure ('full' or 'molecular').
-    random_variation : bool, optional
-        Whether to apply random variation to bond angles and lengths (default is True).
-    screen : bool, optional
+    settings: dict
+        Required settings for generating the amorphous polymer system.
+    verbose : bool, optional
         Whether to print the generated system's properties to the console (default is True).
 
-    Returns
-    -------
-    PEAmorphousSystem or PPAmorphousSystem
+    Returns:
+    --------
+    PEAmorphousSystem or PPAmorphousSystem : obj
         The generated amorphous polymer system instance.
-
-    Notes
-    -----
-    The system is also saved to a LAMMPS-format data file in the specified atom format.
+    coeffs : str
+        Class 2 forcefield coefficients of COMPASS or PCFF for the specified material.
     """
-    if screen:
-        # Print detailed information
-        print(f'# Generating {Ns} amorphous {material} system(s) ...')
-    for ns in range(Ns):
-        if material == 'PE':
-            system = PEAmorphousSystem(Nc, Nm, random_variation)
-        else:
-            system = PPAmorphousSystem(Nc, Nm, random_variation)
-        output = f'{material}_{Nm}m{Nc}c_{ns+1:02d}.lammps'
-        coeffs = potential_coefficients(material, potential_coeffs)
-        write_data_file(output, system, atoms_format, coeffs)
+    required = ['Ns', 'Nc', 'Nm']
+    key_types = {'Ns': int, 'Nc': int, 'Nm': int, 'potential_coeffs': str, 'atoms_format': str}
+    value_constraints = {'Ns': lambda x: x > 0, 'Nc': lambda x: x > 0, 'Nm': lambda x: x > 0}
+    defaults = dict(atoms_format='full', random_variation=True)
+    # Validate the input settings
+    settings = validate_settings(settings, required, key_types, value_constraints, defaults)
 
-        if screen:
-            # Show the system properties on the screen
-            print(f'-- System {ns+1}')
-            name = {0: 'C', 1: 'H'}
-            atom_types = {a: t + 1 for (a, t) in system._forcefield_atom_types.items()}
-            print(f'---- {system.Na:>4d} atoms of types:\t{atom_types}')
-            if system.bonds:
-                bond_types = {name[a[0]]+name[a[1]]: i + 1
-                               for i, a in enumerate(system.unique_bond_types)}
-                print(f'---- {len(system.bonds):>4d} bonds of types:\t{bond_types}')
-            if system.angles:
-                angle_types = {name[a[0]]+name[a[1]]+name[a[2]]: i + 1
-                                     for i, a in enumerate(system.angle_types)}
-                print(f'---- {len(system.angles):>4d} angles of types:\t{angle_types}')
-            if system.dihedrals:
-                dihedral_types = {name[a[0]]+name[a[1]]+name[a[2]]+name[a[3]]: i + 1
-                                  for i, a in enumerate(system.dihedral_types)}
-                print(f'---- {len(system.dihedrals):>4d} dihedrals of types:\t{dihedral_types}')
-            if system.impropers:
-                improper_types = {name[a[0]]+name[a[1]]+name[a[2]]+name[a[3]]: i + 1
-                                  for i, a in enumerate(system.improper_types)}
-                print(f'---- {len(system.impropers):>4d} impropers of types:\t{improper_types}')
-            print(f'---- Output: {output}\n')
+    for ns in range(settings['Ns']):
+        if material in ['PE', 'Pe', 'pe']:
+            system = PEAmorphousSystem(settings)
+        elif material in ['PP', 'Pp', 'pp']:
+            system = PPAmorphousSystem(settings)
+        else:
+            raise ValueError('Not implemented material: {material}')
+        # Specified forcefield potential coefficients for the material
+        if 'potential_coeffs' in settings:
+            system.coeffs = potential_coefficients(material, settings['potential_coeffs'])
+        system.atoms_format = settings['atoms_format']
+        system.output = f'aa_{material}_{settings["Nm"]}m{settings["Nc"]}c_{ns+1:02d}.lammps'
+        # Write the system into a file
+        write_data_file(system)
+        if verbose:
+            verbose_aa_details('Amorphous', ns, system)
     return system
 
 
-def crystal_system(material, Ns, Na, Nb, Nc, potential_coeffs='compass',
-                   atoms_format='full', random_variation=True, screen=True):
+def amorphous_cg_system(material, settings, verbose):
+    """
+    Generate a coarse-grained (CG) amorphous polymer system using bead-spring model
+    and save it to a LAMMPS data file.
+
+    Parameters:
+    -----------
+    material : str
+        Type of polymer system to generate ('PE' or 'PP').
+    settings: dict
+        Required settings for generating the amorphous polymer system.
+    verbose : bool, optional
+        Whether to print the generated system's properties to the console (default is True).
+
+    Returns:
+    --------
+    BeadSpringSystem : obj
+        The generated CG amorphous polymer system instance.
+
+    Notes:
+    ------
+    The system is also saved to a LAMMPS-format data file in the specified atom format.
+    """
+    required = ['rho', 'Ns', 'Nc', 'Nm', 'beads', 'bonds']
+    key_types = {'rho': float, 'Ns': int, 'Nc': int, 'Nm': int, 'monomer': str,
+                 'beads': dict, 'bonds': dict, 'angles': dict}
+    value_constraints = {'rho': lambda x: x > 0, 'Ns': lambda x: x > 0, 'Nc': lambda x: x > 0,
+                         'Nm': lambda x: x > 0, 'monomer': lambda x: len(x) > 0,
+                         'beads': lambda x: len(x) > 0, 'bonds': lambda x: len(x) > 0,
+                         'angles': lambda x: len(x) > 0}
+    # Validate the input settings
+    settings = validate_settings(settings, required, key_types, value_constraints)
+
+    # Generate n random system with the given properties
+    for ns in range(settings['Ns']):
+        system = BeadSpringSystem(settings)
+        system.output = f'cg_{material}_{settings["Nm"]}m{settings["Nc"]}c_{ns+1:02d}.lammps'
+        # Write the system into a file
+        write_data(system)
+        if verbose:
+            verbose_cg_details(ns, system)
+    return system
+
+
+def crystalline_aa_system(material, settings, verbose):
     """
     Placeholder function for generating crystalline polymer systems.
 
@@ -170,5 +194,137 @@ def crystal_system(material, Ns, Na, Nb, Nc, potential_coeffs='compass',
     None
         The function will generate the crystalline polymer system and write it to a file.
     """
-    pass
+    required = ['Ns', 'Na', 'Nb', 'Nc']
+    key_types = {'Ns': int, 'Na': int, 'Nb': int, 'Nc': int, 'modification': str,
+                 'potential_coeffs': str, 'atoms_format': str, 'pbc': bool}
+    value_constraints = {'Ns': lambda x: x > 0, 'Na': lambda x: x > 0,
+                         'Nb': lambda x: x > 0, 'Nc': lambda x: x > 0,
+                         'modification': lambda x: x in ['alpha', 'beta']}
+    defaults = dict(atoms_format='full', modification='alpha', pbc=True)
+    # Validate the input settings
+    settings = validate_settings(settings, required, key_types, value_constraints, defaults)
+
+    for ns in range(settings['Ns']):
+        if material in ['PE', 'Pe', 'pe']:
+            system = PECrystallineSystem(settings)
+            modification = ''
+        elif material in ['PP', 'Pp', 'pp']:
+            system = PPCrystallineSystem(settings)
+            modification = f'{settings["modification"]}_'
+        else:
+            raise ValueError('Not implemented material: {material}')
+        # Specified forcefield potential coefficients for the material
+        if 'potential_coeffs' in settings:
+            system.coeffs = potential_coefficients(material, settings['potential_coeffs'])
+        system.atoms_format = settings['atoms_format']
+        system.output = f'aa_{material}_{modification}'\
+                        f'a{settings["Na"]}b{settings["Nb"]}c{settings["Nc"]}_'\
+                        f'{ns+1:02d}.lammps'
+        # Write the system into a file
+        write_data_file(system)
+        if verbose:
+            verbose_aa_details('Crystalline', ns, system)
+    return system
+
+
+def crystalline_cg_system(material, settings, verbose):
+    raise ValueError('Not implemented: {resolution} {phase}')
+
+
+def validate_settings(settings, required_keys, key_types, value_constraints, defaults=None):
+    """
+    Validates the settings provided by the user.
+    """
+    class SettingsError(Exception):
+        """
+        Custom exception for invalid settings.
+        """
+        pass
+
+    # Check if all required keys are present
+    for key in required_keys:
+        if key not in settings:
+            raise SettingsError(f'Missing required setting: {key}')
+
+    # Check if the types of values are correct
+    for key, value in settings.items():
+        if key not in key_types:
+            raise SettingsError(f'Invalid input setting: {key}')
+        if not isinstance(value, key_types[key]):
+            raise SettingsError(f'Invalid "{key}" type: '
+                                f'Expected {key_types[key].__name__}, '
+                                f'got {type(value).__name__}')
+
+    # Check if the values meet additional constraints
+    for key, constraint_func in value_constraints.items():
+        if key in settings and not constraint_func(settings[key]):
+            raise SettingsError(f'Invalid value for "{key}": {input_settings[key]}')
+
+    # Add default values if not given in settings (if applicable)
+    if defaults:
+        for key, value in defaults.items():
+            if key not in settings:
+                settings[key] = value
+    return settings
+
+
+def verbose_aa_details(phase, ns, system):
+    # Show the system properties on the screen
+    print(f'# Generated {phase} {system.material} system {ns+1} ...')
+    name = {0: 'C', 1: 'H'}
+    atom_types = {a: t + 1 for a, t in system._forcefield_atom_types.items()}
+    print(f'---- {system.Nt:>4d} atoms of types:\t{atom_types}')
+    bond_types = {name[a[0]]+name[a[1]]: i + 1
+                                      for i, a in enumerate(system.bond_types)}
+    print(f'---- {len(system.bonds):>4d} bonds of types:\t{bond_types}')
+    if system.angles:
+        angle_types = {name[a[0]]+name[a[1]]+name[a[2]]: i + 1
+                                     for i, a in enumerate(system.angle_types)}
+        print(f'---- {len(system.angles):>4d} angles of types:\t{angle_types}')
+    if system.dihedrals:
+        dihedral_types = {name[a[0]]+name[a[1]]+name[a[2]]+name[a[3]]: i + 1
+                          for i, a in enumerate(system.dihedral_types)}
+        print(f'---- {len(system.dihedrals):>4d} dihedrals of types:\t{dihedral_types}')
+    if system.impropers:
+        improper_types = {name[a[0]]+name[a[1]]+name[a[2]]+name[a[3]]: i + 1
+                                  for i, a in enumerate(system.improper_types)}
+        print(f'---- {len(system.impropers):>4d} impropers of types:\t{improper_types}')
+    print(f'---- Output: {system.output}\n')
+
+
+def verbose_cg_details(ns, system):
+    """ Show the details of the system on the screen in verbose mode. """
+    print(f'\n################# Generated System {ns+1} ####################')
+    masses = {t: b[1] for t, b in sorted(system.bead_types.items())}
+    masses['System'] = round(system.mass, 3)
+    print(f'{"Masses":>10}: {masses} (g/mol)')
+    dimensions = {'Box': f'{system.box[0,0]:.3f} x '
+                         f'{system.box[1,1]:.3f} x '
+                         f'{system.box[2,2]:.3f}'}
+    dimensions['Volume'] = round(system.volume, 3)
+    print(f'{"Dimensions":>10}: {dimensions} (A^3)')
+    beads = {f'{t:^1}': system.Nm * system.Nc
+                                 for t, b in sorted(system.bead_types.items())}
+    beads['Total'] = len(system.beads)
+    print(f'{"Beads":>10}: {beads}')
+    bonds = {t: len([b for b in system.bonds if b[0] == n])
+                                 for t, n in sorted(system.bond_types.items())}
+    bonds['Total'] = len(system.bonds)
+    print(f'{"Bonds":>10}: {bonds}')
+    if system.angle_types:
+        angles = {t: len([a for a in system.angles if a[0] == n])
+                                for t, n in sorted(system.angle_types.items())}
+        angles['Total'] = len(system.angles)
+        print(f'{"Angles":>10}: {angles}')
+    if system.dihedral_types:
+        dihedrals = {t: len([d for d in system.dihedrals if d[0] == n])
+                             for t, n in sorted(system.dihedral_types.items())}
+        dihedrals['Total'] = len(system.dihedrals)
+        print(f'{"Dihedrals":>10}: {dihedrals}')
+    if system.improper_types:
+        impropers = {t: len([i for i in system.impropers if i[0] == n])
+                             for t, n in sorted(system.improper_types.items())}
+        impropers['Total'] = len(system.impropers)
+        print(f'{"Impropers":>10}: {impropers}')
+    print(f'{"Output":>10}: {system.output}\n')
 

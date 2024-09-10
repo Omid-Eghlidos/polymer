@@ -53,10 +53,11 @@ import numpy
 from numpy import linalg, random, cross, dot
 from sympy import symbols, Eq, solve
 from math import cos, sin, pi, radians
-from generation.lib.polymer_system import PolymerSystem
+from generation.lib.amorphous_system import AmorphousSystem
+from generation.lib.potential_coefficients import potential_coefficients
 
 
-class PPAmorphousSystem(PolymerSystem):
+class PPAmorphousSystem(AmorphousSystem):
     """
     A class to represent an amorphous polypropylene (PP) system.
 
@@ -69,6 +70,22 @@ class PPAmorphousSystem(PolymerSystem):
 
     Attributes
     ----------
+    Nc : int
+        Number of chains per system.
+    Nm : int
+        Number of monomers per chain.
+    random_variation : bool
+        Whether to apply random variation to torsion angles.
+    density : float
+        Density of the amorphous PP system.
+    N_C : int
+        Number of Carbon atoms per monomer.
+    N_H : int
+        Number of Hydrogen atoms per monomer.
+    forcefield_atom_types : dict
+        Mapping of atom types to integer identifiers.
+    angle_size : dict
+        Bond angles in radians for the PP system.
     settings : Settings
         Configuration settings specific to the PP system.
 
@@ -95,66 +112,85 @@ class PPAmorphousSystem(PolymerSystem):
     __add_chiral_hydrogen(self, i, bond_vec)
         Adds a chiral/pendant hydrogen to each chiral carbon (C1) in the system.
     """
-    class Settings():
-        """
-        A nested class to hold the settings specific to the PP system.
-
-        Attributes
-        ----------
-        Nc : int
-            Number of chains per system.
-        Nm : int
-            Number of monomers per chain.
-        random_variation : bool
-            Whether to apply random variation to torsion angles.
-        density : float
-            Density of the amorphous PP system.
-        monomer_atom_numbers : dict
-            Number of atoms per monomer, categorized by element.
-        forcefield_atom_types : dict
-            Mapping of atom types to integer identifiers.
-        angle_size : dict
-            Bond angles in radians for the PP system.
-        """
-        def __init__(self, Nc, Nm, random_variation=True):
-            self.Nc = Nc
-            self.Nm = Nm
-            self.random_variation = random_variation
-            self.density = 0.855
-            # PP monomer has 6 atoms: 2 Carbons and 4 Hydrogens
-            self.monomer_atom_numbers = dict(C=3, H=6)
-            # Each chain has an initiator and a terminator
-            # Types of different forcefield atoms in the system
-            self.forcefield_atom_types = dict(C1=0, C2=1, C3=2, H=3)
-            # Bond-angles of PP in rad (degrees) (Antoniadis, 1998)
-            # R-C-C (C3C1C2) = C-C-R (C2C1C3) = 1.9465 rad = 111.5262 deg
-            # aC-C-C (C1C2C1) = 1.8778 rad = 107.5900 deg
-            # cC-C-C (C2C1C2) = 1.9380 rad = 111.0392 deg
-            # R-C-R (C3C1C3) = 2.0560 rad = 117.8001 deg - initiator and terminator
-            self.angle_size = dict(CCC=1.8778, RCC=1.9465, HCC=1.2800)
-
-    def __init__(self, Nc, Nm, random_variation):
+    def __init__(self, settings):
         """
         Initialize the PPAmorphousSystem with the provided settings.
 
-        Parameters
-        ----------
-        Nc : int
-            Number of chains per system.
-        Nm : int
-            Number of monomers per chain.
-        random_variation : bool, optional
-            Whether to apply random variation to torsion angles (default is True).
+        Parameters:
+        -----------
+        settings : dict
+            Input settings for generating the PE amorphous system.
         """
-        self.settings = self.Settings(Nc, Nm, random_variation)
-        self.__methyls   = []
-        super().__init__(self.settings)
+        # Add the settings variable as attributes
+        self.__dict__.update(settings)
 
-    def _add_carbons(self):
+        # Material name
+        self.material = 'PP'
+        # Density of the amorphous system (g/cm^3)
+        self.rho = 0.855
+        # PP monomer has 9 atoms: 3 Carbons and 6 Hydrogens
+        # Number of Carbon atoms in each PE monomer
+        self.N_C = 3
+        # Number of Hydrogen atoms in each PE monomer
+        self.N_H = 6
+        # Total number of atoms in the system + an initiator and a terminator for each chain
+        self.Nt = self.Nc * self.Nm * (self.N_C + self.N_H) + 2 * self.Nc
+        # Random variation to be added to dihedral angles for generation
+        self.random_variation = True
+        # Randomly flip the dihedral angles
+        self.random_flip = False
+        # Types of different forcefield atoms in the system
+        self._forcefield_atom_types = dict(C1=0, C2=1, C3=2, H=3)
+        # Bond-angles of PP in rad (degrees) (Antoniadis, 1998)
+        # R-C-C (C3C1C2) = C-C-R (C2C1C3) = 1.9465 rad = 111.5262 deg
+        # aC-C-C (C1C2C1) = 1.8778 rad = 107.5900 deg
+        # cC-C-C (C2C1C2) = 1.9380 rad = 111.0392 deg
+        # R-C-R (C3C1C3) = 2.0560 rad = 117.8001 deg - initiator and terminator
+        self._angle_size = dict(CCC=1.8778, RCC=1.9465, HCC=1.2800)
+        # Dihedral angles
+        self._dihedral_size = [numpy.pi]
+        # Store the methyl carbons
+        self.__methyl_carbons = []
+
+        # Add shared attributes from AmorphousSystem
+        super().__init__()
+        
+        # Construct the system with the given size and store its parameters
+        self._build_system()
+
+    def _build_system(self):
+        """
+        Generate the polymer system with specified parameters.
+
+        This method builds a polymer system containing `Nc` chains, each with
+        `9 * Nm` atoms, by defining the appropriate bond lengths, bond angles,
+        and dihedral angles. The method performs the following steps:
+
+        - Creates the simulation box.
+        - Adds carbon atoms.
+        - Adds hydrogen atoms.
+        - Maps atom coordinates to the periodic boundary condition.
+        - Adds angles between bonded atoms.
+        - Adds dihedral torsion angles.
+        - Adds improper angles.
+
+        Returns
+        -------
+        None
+        """
+        self._create_simulation_box()
+        self._add_carbon_atoms()
+        self._add_hydrogen_atoms()
+        self._map_to_PBC()
+        self._add_angles()
+        self._add_dihedrals()
+        self._add_impropers()
+
+    def _add_carbon_atoms(self):
         """
         Add backbone and methyl carbons specific to the PP system.
 
-        This method overrides the `__add_carbons` placeholder method in the
+        This method overrides the `_add_carbon_atoms` placeholder method in the
         PolymerSystem base class.
         """
         atom_id = 0
@@ -164,7 +200,7 @@ class PPAmorphousSystem(PolymerSystem):
             self.__add_methyl_carbons()
             for  i in range(self.Nm):
                 # Add methyl carbons
-                self._add_atom(atom_id, nc, 'C3', self.__methyls[i])
+                self._add_atom(atom_id, nc, 'C3', self.__methyl_carbons[i])
                 self._add_bond(atom_id, atom_id+1)
                 if i == 0:
                     # After adding a hydrogen as an initiator C1 becomes C2
@@ -185,11 +221,11 @@ class PPAmorphousSystem(PolymerSystem):
         self._atom_id += atom_id
         self._construct_bond_table()
 
-    def _add_hydrogens(self):
+    def _add_hydrogen_atoms(self):
         """
         Add hydrogen atoms specific to the PP system.
 
-        This method overrides the `__add_hydrogens` placeholder method in the
+        This method overrides the `_add_hydrogen_atoms` placeholder method in the
         PolymerSystem base class.
         """
         nc = 1
@@ -209,6 +245,7 @@ class PPAmorphousSystem(PolymerSystem):
                 self._add_gemini_hydrogens(i, bond_vec)
             elif len(bonded) == 3:
                 self.__add_chiral_hydrogen(i, bond_vec)
+        # Create the bond table for all the atoms in the system
         self._construct_bond_table()
 
     def _add_initiator(self, i, bond_vec):
@@ -278,7 +315,7 @@ class PPAmorphousSystem(PolymerSystem):
             R = numpy.array([x, y, z], dtype=numpy.float64)
             assert round(linalg.norm(R), 2) == self._bond_length['CC']
             coords.append(self._backbones[i] + R)
-        self.__methyls = coords
+        self.__methyl_carbons = coords
 
     def __add_chiral_hydrogen(self, i, bond_vec):
         """

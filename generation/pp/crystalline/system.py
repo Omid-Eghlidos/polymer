@@ -1,320 +1,312 @@
+
+
 import numpy
-from numpy.linalg import norm
-from numpy import sin, cos, cross, dot
-
-class system:
-    def __init__(self):
-        # Store the simulation box dimension
-        self.box = numpy.identity(3)
-        # Stores atoms properties (list of [id, mol, type, x, y, z]).
-        self.atoms = []
-        # List of atom types (element) for each atom.
-        self.atom_types = []
-        # List of atom charges for each type (1998 - Sun - COMPASS)
-        self.charge_types = {'c1':-0.053, 'c2':-0.106, 'c3':-0.159, 'h': 0.053}
-        # List of atom charges for each type
-        self.charges = []
-        # List of forcefield type (e.g. 'C3') for each atom.
-        self.forcefield_types = []
-         # Store the molecule that each atom belongs to
-        self.molecule = []
-        # Stores bonds (list of pairs of zero-indexed atom ids).
-        self.bonds = []
-        # Possible bond types in iPP (CH == HC)
-        self.bond_types = {'CC' : 1, 'CH' : 2}
-        # Stores angles (list of triplets).
-        self.angles = []
-        # Store unique angle types
-        self.angle_types = []
-        # Stores dihedrals (list of quartets).
-        self.dihedrals = []
-        # Store unique dihedral types
-        self.dihedral_types = []
-        # Stores impropers (list of quartets).
-        self.impropers = []
-        # Store unique improper types
-        self.improper_types = []
+from numpy import linalg, cross, dot
+from math import cos, sin, pi, radians
+from generation.lib.crystalline_system import CrystallineSystem
 
 
-    def add_atom(self, x, atom_type, molecule):
-        ''' Helper function for adding atoms to the system. '''
-        self.atoms.append(x)
-        self.atom_types.append(atom_type)
-        # Initially forcefield type will be the same as atom type.
-        self.forcefield_types.append(atom_type.lower())
-        self.charges.append(self.charge_types['h'])
-        self.molecule.append(molecule)
+class PPCrystallineSystem(CrystallineSystem):
+    def __init__(self, settings):
+        # Dynamically update instance attributes with settings values
+        self.__dict__.update(settings)
 
+        # Add the material name
+        self.material = 'iPP'
+        # PP monomer has 9 atoms: 3 Carbons and 6 Hydrogens
+        # Number of Carbon atoms in each PP monomer
+        self.N_C = 3
+        # Number of Hydrogen atoms in each PE monomer
+        self.N_H = 6
+        # Number of monomers per chain
+        self.N_m = 3
+        # Number of chains per unit cell
+        if self.modification == 'alpha':
+            self.N_c = 4
+        elif self.modification == 'beta':
+            self.N_c = 3
+        # Total number of atoms in the system
+        self.Nt = self.Na * self.Nb * self.Nc * (self.N_C + self.N_H) * self.N_m * self.N_c
+        # Bond offsets between unitcells
+        # The Carbon bond order in an iPP unit cell chain
+        #   C3 (1)            C3 (4)            C3 (7)
+        #   |                 |                 |
+        #   C1 (2) - C2 (3) - C1 (5) - C2 (6) - C1 (8) - C2 (9)
+        # Id of next C1 connected to C2 is +2, while the rest are +1
+        self.bond_offsets = [1, 1, 2, 1, 1, 2, 1, 1, 2]
+        # Atom types arrangement inside each unit cell chain
+        self.unit_types  = ['C3', 'C1', 'C2', 'C3', 'C1', 'C2', 'C3', 'C1', 'C2']
+        # List of forcefield type (e.g. 'C2') for each atom.
+        self._forcefield_atom_types = dict(C1=0, C2=1, C3=2, H=3)
+        # Bond-angles of PP in rad (degrees) (Antoniadis, 1998)
+        self._angle_size = dict(HCC=1.2800)
 
-    def add_hydrogen_atoms(self):
-        ''' Adds hydrogen atoms to the crystalline structure. '''
-        for i in range(len(self.atoms)):
-            bonds = [b[:] for b in self.bonds if i in b]
+        # Add shared attributes from CrystallineSystem
+        super().__init__()
 
-            ''' Sorts each bond so that atom i is first, this way
-            outward bond vectors from atom i can be computed as:
-            dx = self.atoms[b[1]] - self.atoms[b[0]] '''
-            for b in bonds:
-                b.sort(key = lambda x: x != i)
-            # Bond vectors from atom i to atom in each bond.
-            bv = [self.bond_vector(*b) for b in bonds]
-            if len(bonds) == 1:
-                self.forcefield_types[i] = 'c3'
-                self.charges[i] = self.charge_types['c3']
-                self.add_methyl_carbons(i, bv)
-            elif len(bonds) == 2:
-                self.forcefield_types[i] = 'c2'
-                self.charges[i] = self.charge_types['c2']
-                self.add_achiral_carbons(i, bv)
-            elif len(bonds) == 3:
-                self.forcefield_types[i] = 'c1'
-                self.charges[i] = self.charge_types['c1']
-                self.add_chiral_carbon(i, bv)
+        # Construct the system with the given size and store its parameters
+        self._build_system()
 
+    def _build_system(self):
+        """
+        Generate the polymer system with specified parameters.
+        """
+        self._create_simulation_box()
+        self._add_carbon_atoms()
+        self._add_hydrogen_atoms()
+        self._add_angles()
+        self._add_dihedrals()
+        self._add_impropers()
 
-    def add_methyl_carbons(self, i, bv):
-        # Gets index of carbon adjacent to methyl carbon, i.
-        j = next(b for b in self.bonds if i in b)[1]
-        bonds = [b[:] for b in self.bonds if j in b and i not in b]
-        for b in bonds:
-            b.sort(key = lambda x: x != j)
+    def _unit_cell(self):
+        """
+        Columns of unit cell are the fractional coordinate (a, b, and c).
+        """
+        if self.modification == 'alpha':
+            return self.__monoclinic()
+        elif self.modification == 'beta':
+            return self.__hexagonal()
+
+    def _space_group(self):
+        """
+        Adding chains in a unit cell using space group symmetry operations.
+        """
+        if self.modification == 'alpha':
+            return self.__C2_c()
+        elif self.modification == 'beta':
+            return self.__P31_21()
+
+    def __monoclinic(self):
+        """
+        Parameters for monoclinic unit cell of the alpha modification of crystalline PP.
+        Refer to G. Natta et. al. (1959).
+        """
+        beta = 99.5 * numpy.pi / 180.0
+        return numpy.array([[6.63,  0.00, 6.50*numpy.cos(beta)],
+                            [0.00, 20.78, 0.0],
+                            [0.00,  0.00, 6.50*numpy.sin(beta)]])
+
+    def __hexagonal(self):
+        """
+        Parameters for hexagonal unit cell of the beta modification of crystalline PP.
+        Refer to Dino R. Ferro et al. (1998).
+        """
+        gamma = 120.0 * numpy.pi / 180.0
+        return numpy.array([[11.03, 11.03*numpy.cos(gamma), 0.00],
+                            [0.00 , 11.03*numpy.sin(gamma), 0.00],
+                            [0.00 ,  0.00 , 6.50]])
+
+    def __C2_c(self):
+        """
+        Obtain fractional coordinates of all the chains in the unit cell using
+        C2/c space group symmetry given the first chain of the alpha modification
+        in its monoclinic unit cell, G. Natta et. al. (1959)
+        """
+        # Carbons of the first chain inside the unit cell
+        C1 = numpy.array([[-0.0727, 0.2291, 0.2004],  #C3 0: 1
+                          [-0.0765, 0.1592, 0.2788],  #C1 1: 0 2
+                          [-0.1021, 0.1602, 0.5098],  #C2 2: 1 4
+                          [-0.3087, 0.0589, 0.4941],  #C3 3: 4
+                          [-0.1146, 0.0928, 0.6057],  #C1 4: 2 3 5
+                          [-0.1044, 0.0854, 0.8428],  #C2 5: 4 7
+                          [ 0.2775, 0.0797, 0.9260],  #C3 6: 7
+                          [ 0.0872, 0.1156, 0.9730],  #C1 7: 5 6 8
+                          [ 0.1026, 0.1221, 1.2109]]) #C2 8: 7
+        C2 = C1.copy()
+        C2[:,0] =  C1[:,0]
+        C2[:,1] = -C1[:,1]
+        C2[:,2] =  C1[:,2] + 0.5
+
+        C3 = C1.copy()
+        C3[:,0] =  C2[:,0] - 0.5
+        C3[:,1] =  C2[:,1] + 0.5
+        C3[:,2] =  C2[:,2]
+
+        C4 = C1.copy()
+        C4[:,0] =  C1[:,0] - 0.5
+        C4[:,1] =  C1[:,1] - 0.5
+        C4[:,2] =  C1[:,2]
+        return C1, C2, C3, C4
+
+    def __P31_21(self):
+        """
+        Adding chains in a unitcell using symmetry operations, coordinates
+        from D.L. Dorset et al. (1998) iPP beta-phase: A study in frustration
+        """
+        # Beta unit cell has three chains A, B, and C, each with 9 Carbon atoms
+        # For each chain only the first 3 rabon atoms of the monomer are given
+        # while the other 6 will be obtained through symmetry operation
+        A = numpy.array([[0.2311 , 0.1785, 0.5951],  # C3
+                         [0.0823 , 0.0772, 0.6740],  # C1
+                         [0.0696 , 0.0692, 0.9104]]) # C2
+        C1 = self.__full_carbon_chain(A, 0)
+
+        B = numpy.array([[0.5426, 0.6813, 0.4169],   # C3
+                         [0.4199, 0.6977, 0.4958],   # C1
+                         [0.4169, 0.6991, 0.7328]])  # C2
+        C2 = self.__full_carbon_chain(B, 1)
+
+        C = numpy.array([[0.8910, 0.4606, 0.6334],   # C3
+                         [0.7410, 0.4004, 0.7168],   # C1
+                         [0.7444, 0.4040, 0.9538]])  # C2
+        C3 = self.__full_carbon_chain(C, 2)
+        return C1, C2, C3
+
+    def __full_carbon_chain(self, CC, i):
+        """
+        Create the full Carbon chain from the first 3 Carbon atoms of a
+        beta modification chain using the space group symmetry operation from
+        Dino R. Ferro et al. (1998) """
+        Helix_center = numpy.array([[0.0    , 0.0    , 0.0],
+                                    [1.0/3.0, 2.0/3.0, 0.0],
+                                    [2.0/3.0, 1.0/3.0, 0.0]])
+        C = numpy.zeros([9,3])
+        C[0:3,:] =  CC
+        C[0:3,:] =  C[0:3,:] - Helix_center[i,:]
+        C[3:6,0] = -C[0:3,1]
+        C[3:6,1] =  C[0:3,0] - C[0:3,1]
+        C[3:6,2] =  C[0:3,2] + 1/3
+        C[6:9,0] = -C[0:3,0] + C[0:3,1]
+        C[6:9,1] = -C[0:3,0]
+        C[6:9,2] =  C[0:3,2] + 2/3
+        C[0:3,:] =  C[0:3,:] + Helix_center[i,:]
+        C[3:6,:] =  C[3:6,:] + Helix_center[i,:]
+        C[6:9,:] =  C[6:9,:] + Helix_center[i,:]
+        return C
+
+    def _add_hydrogen_atoms(self):
+        """
+        Add hydrogen atoms specific to the PP system.
+
+        This method overrides the `_add_hydrogen_atoms` placeholder method in the
+        PolymerSystem base class.
+        """
+        nc = 1
+        for i, bonded in enumerate(self.bond_table):
+            if not bonded:
+                continue
+            # Bond vectors from atom i to atom in each bond
+            bond_vec = [self._bond_vector(i, b) for b in bonded]
+            if len(bonded) == 1:
+                self._add_methyl_hydrogens(i, bond_vec)
+            elif len(bonded) == 2:
+                self._add_gemini_hydrogens(i, bond_vec)
+            elif len(bonded) == 3:
+                self.__add_chiral_hydrogen(i, bond_vec)
+        # Create the bond table for all the atoms in the system
+        self._construct_bond_table()
+
+    def _add_methyl_hydrogens(self, i, bond_vec):
+        """
+        Add 3 hydrogen atoms to each methyl carbon (C3) in the system.
+
+        Updates atom IDs, coordinates, and bonds after adding methyl hydrogens.
+
+        Parameters
+        ----------
+        i : int
+            Index of the current atom.
+        bond_vec : list of numpy.ndarray
+            List of bond vectors for the current atom.
+
+        Returns
+        -------
+        None
+        """
+        j = self.bond_table[i][0]
+        bonds = [[j, k] for k in self.bond_table[j] if k != i]
         if len(bonds) == 2:
-            # Bond from C_i-1 to C_i+1 (see Fig 1a in 1998 Theodorou paper).
-            rcc = self.bond_vector(bonds[0][1], bonds[1][1])
+            # Bond from C_i-1 to C_i+1
+            rcc = self._bond_vector(bonds[0][1], bonds[1][1])
         else:
-            # For finite chains, we can't use skeleton vector at ends.
-            rcc = [0,0,1]
-		# u,v,w make a coordinate system about the methyl carbon.
-        u = -bv[0] / norm(bv[0])
-        v = cross(u, rcc) / norm(cross(u, rcc))
+            # For start and end of the chains, we can't use skeleton vector
+            rcc = [0, 0, 1]
+        # Basis vectors u, v, and w for a coordinate system created about the methyl Carbon
+        u = -self._normalized(bond_vec[0])
+        v = self._normalized(cross(u, rcc))
         w = cross(u, v)
 
-        phi = (109.0 - 90.0)/180.0 * numpy.pi
-        for theta in [0.0, 2.0/3.0*numpy.pi, 4.0/3.0*numpy.pi]:
-            theta += numpy.pi/6.0
-            r = sin(phi)*u + cos(phi)*(cos(theta)*v + sin(theta)*w)
-            self.add_atom(self.atoms[i] + 1.10*r, 'H', self.molecule[i])
-        for j in range(1,4):
-            self.bonds.append([i, len(self.atoms)-j])
+        # Position the methyl Carbon (C3) at the tetrahedral angle (~109.0°)
+        tetrahedral_angle = 109.0
+        # Convert to radians and adjust by 90°
+        phi = radians(tetrahedral_angle - 90.0)
+        # Theta shift to rotate all the 3 methyl hydrogens
+        theta_shift = pi/6.0
+        for theta in [0.0, 2.0/3.0*pi, 4.0/3.0*pi]:
+            theta += theta_shift
+            # Unit vector from methyl carbon towards a methyl hydrogen
+            r  = sin(phi)*u + cos(phi) * (cos(theta)*v + sin(theta)*w)
+            assert round(linalg.norm(r), 1) == 1.0
+            # Position of a methyl hydrogen
+            rH = self.atom_coords[i] + self._bond_length['CH']*r
+            self._add_atom(self._atom_id, self.atom_chains[i], 'H', rH)
+            self._add_bond(i, self._atom_id)
+            self._atom_id += 1
 
+    def _add_gemini_hydrogens(self, i, bond_vec):
+        """
+        Add 2 gemini hydrogens to each achiral/gemini carbon (C2) in the system.
 
-    def add_achiral_carbons(self, i, bv):
-        bi = -bv[0] / norm(bv[0])
-        bj =  bv[1] / norm(bv[1])
-        u = (bi - bj) / numpy.sqrt(2.0*(1.0-dot(bi,bj)))
-        v = cross(bi, bj) / norm(cross(bi, bj))
+        Parameters
+        ----------
+        i : int
+            Index of the current carbon atom.
+        bond_vec : list of numpy.ndarray
+            List of bond vectors for the current carbon atom.
 
-        qh = 1.28
-        h1 = self.atoms[i] + 1.10*(sin(qh/2)*u + cos(qh/2)*v)
-        h2 = self.atoms[i] + 1.10*(sin(qh/2)*u - cos(qh/2)*v)
-        self.add_atom(h1, 'H', self.molecule[i])
-        self.add_atom(h2, 'H', self.molecule[i])
-        for j in range(1,3):
-            self.bonds.append([i, len(self.atoms)-j])
+        Returns
+        -------
+        Updated atom IDs, coordinates, and bonds after adding gemini hydrogens.
+        """
+        # Common bisector between angles H+_i-C_i-H-_i and C_(i-1)-C_i-C_(i+1)
+        bi = -self._normalized(bond_vec[0])
+        bj =  self._normalized(bond_vec[1])
+        # Unit vector along bisector of angle C_(i-1)-C_i-C_(i+1) in the
+        # direction from C_i towards H+_i and H-_i
+        u = (bi - bj) / numpy.sqrt(2.0 * (1.0 - dot(bi, bj)))
+        # Unit vector normal to the plane C_(i-1)-C_i-C_(i+1)
+        v = self._normalized(cross(bi, bj))
 
+        # Angle between the gemini hydrogens connected to the C2 in radian
+        theta_h = self._angle_size['HCC']
+        for j in range(2):
+            # Direction of the hydrogen
+            n = 1 if j == 0 else -1
+            # Position of the gemini hydrogens
+            rH = self.atom_coords[i] +\
+                 self._bond_length['CH']*(sin(theta_h/2)*u + n*cos(theta_h/2)*v)
+            self._add_atom(self._atom_id, self.atom_chains[i], 'H', rH)
+            self._add_bond(i, self._atom_id)
+            self._atom_id += 1
 
-    def add_chiral_carbon(self, i, bv):
+    def __add_chiral_hydrogen(self, i, bond_vec):
+        """
+        Add a chiral/pendant hydrogen to each chiral carbon (C1) in the system.
+
+        This private method calculates and adds the position of a chiral hydrogen
+        atom to the chiral carbon atom (C1) in the system. The position is
+        determined by the bond vectors and ensuring that the vector is perpendicular
+        to the plane formed by adjacent atoms.
+
+        Parameters
+        ----------
+        i : int
+            Index of the current carbon atom (C1).
+        bond_vec : list of numpy.ndarray
+            List of bond vectors for the current atom.
+
+        Returns
+        -------
+        None
+        """
         # Atom C_i is connected to C_i-1 and C_i+i and Ri.
         # Vector n is perpendicular to plane containing C_i+i, C_i-1, and R.
-        n = cross(bv[1] - bv[0], bv[2] - bv[0])
-        n /= norm(n)
-        # Vector n should point away from average of other
-        # bond vectors.
-        if dot(n, sum(bv)) > 0:
+        n = self._normalized(cross(bond_vec[1] - bond_vec[0], bond_vec[2] - bond_vec[0]))
+        # Vector n should point away from average of other bond vectors.
+        if dot(n, sum(bond_vec)) > 0:
             n *= -1
-
-        self.add_atom(self.atoms[i] + 1.10*n, 'H', self.molecule[i])
-        self.bonds.append([i, len(self.atoms)-1])
-
-
-    def add_angles(self):
-        ''' Traverses the bond list and defines all bond angles. '''
-        for j in range(len(self.atoms)):
-            # Set J contains all atoms bonded to atom j.
-            J = self.atoms_bonded_to(j)
-            for i in sorted(J):
-                for k in sorted(J):
-                    # Don't add angle twice.
-                    if i < k:
-                        self.add_angle([i, j, k])
-
-
-    def add_angle(self, ijk):
-        ''' Helper function for adding angles to the system. '''
-        types = [self.atom_types[i] for i in ijk]
-        # Accounts for ABC -> CBA symmetry of angle types.
-        if types[0] > types[2]:
-            types = types[::-1]
-            ijk = ijk[::-1]
-        if types not in self.angle_types:
-            self.angle_types.append(types)
-        self.angles.append((self.angle_types.index(types), ijk))
-
-
-    def add_dihedrals(self):
-        for b in self.bonds:
-            j,k = sorted(b)
-            J = [i for i in self.atoms_bonded_to(b[0]) if i != b[1]]
-            K = [i for i in self.atoms_bonded_to(b[1]) if i != b[0]]
-            for i in J:
-                for l in K:
-                    self.add_dihedral([i,j,k,l])
-
-
-    def add_dihedral(self, ijkl):
-        ''' Helper function for adding dihedrals to the system. '''
-        types = [self.atom_types[i] for i in ijkl]
-        # Possible dihedral types
-        # HCCH <=> HCCH
-        # HCCC <=> CCCH
-        # CCCC <=> CCCC
-        # Note: this is not very general.
-        if types[0] > types[-1]:
-            ijkl = ijkl[::-1]
-            types = types[::-1]
-        if types not in self.dihedral_types:
-            self.dihedral_types.append(types)
-        self.dihedrals.append((self.dihedral_types.index(types), ijkl))
-
-
-    def add_impropers(self):
-        ''' Traverse the bond list and defines all improper angles. '''
-        for b in self.bonds:
-            j = sorted(b)[0]
-            bonded_to_j = sorted(self.atoms_bonded_to(j))
-            # The atom needs to have at least three bonds to have an improper
-            if len(bonded_to_j) > 3:
-                for i in bonded_to_j:
-                    for k in bonded_to_j:
-                        for l in bonded_to_j:
-                            if i < k and i < l and l < k:
-                                self.add_improper([i,j,k,l])
-        self.impropers = sorted(self.impropers, key = lambda x: x[1])
-
-
-    def add_improper(self, ijkl):
-        ''' Helper function for adding impropers to the system '''
-        types = sorted([self.atom_types[i] for i in ijkl])
-        # Possible improper types
-        # HCCC <=> CCCH
-        # CCHH <=> HHCC
-        if types not in self.improper_types:
-            self.improper_types.append(types)
-        if (self.improper_types.index(types), ijkl) not in self.impropers:
-            self.impropers.append((self.improper_types.index(types), ijkl))
-
-
-    def atoms_bonded_to(self, i):
-        ''' Returns a list of all atoms bonded to atom i. '''
-        return [next(a for a in b if a != i) for b in self.bonds if i in b]
-
-
-    def bond_vector(self, i, j):
-        ''' Returns the bond vector from atom i to atom j (uses the nearest
-        periodic image of atom j so that bond length is correct). '''
-        return self.wrap_vector(self.atoms[j] - self.atoms[i])
-
-
-    def wrap_vector(self, v):
-        ''' Returns the shortest vector v + i*A + j*B + k*C for any period
-        image i, j, and k '''
-        s = numpy.linalg.solve(self.box.T, v)
-        return v - dot(numpy.round(s), self.box.T)
-
-
-def write_dump_file(s, path):
-    ''' Writes the system to a LAMMPS dump file '''
-    f = open(path, 'w')
-    f.write('ITEM: TIMESTEP\n0\n')
-    f.write('ITEM: NUMBER OF ATOMS\n{}\n'.format(len(s.atoms)))
-    # See https://lammps.sandia.gov/doc/Howto_triclinic.html
-    f.write('ITEM: BOX BOUNDS xy xz yz xx yy zz\n')
-
-    xlo, xhi = 0.0, s.box[0,0]
-    ylo, yhi = 0.0, s.box[1,1]
-    zlo, zhi = 0.0, s.box[2,2]
-    xy, xz, yz = s.box[0,1], s.box[0,2], s.box[1,2]
-
-    xlo_bound = xlo + min(0.0, xy, xz, xy+xz)
-    xhi_bound = xhi + max(0.0, xy, xz, xy+xz)
-    ylo_bound = ylo + min(0.0, yz)
-    yhi_bound = yhi + max(0.0, yz)
-
-    f.write('{:6.3f} {:6.3f} {:6.3f}\n'.format(xlo_bound, xhi_bound, xy))
-    f.write('{:6.3f} {:6.3f} {:6.3f}\n'.format(ylo_bound, yhi_bound, xz))
-    f.write('{:6.3f} {:6.3f} {:6.3f}\n'.format(zlo, zhi, yz))
-
-    f.write('ITEM: ATOMS id type mol x y z\n')
-    for i,x in enumerate(s.atoms):
-        t = 1 if s.atom_types[i] == 'C' else 2
-        f.write('{:6d} {:4d} {:4d} {:8.5f} {:8.5f} {:8.5f}\n'.format(
-                i+1, t, s.molecule[i], *x))
-
-def write_data_file(s, path):
-    ''' Writes the system to a LAMMPS data file. '''
-    f = open(path, 'w')
-    f.write('LAMMPS data file generated by ipp-crystal-generator\n\n')
-    lammps_atom_types = sorted(list(set(s.forcefield_types)))
-    f.write('{:6d} atoms\n'.format(len(s.atoms)))
-    f.write('{:6d} atom types\n'.format(len(lammps_atom_types)))
-    f.write('{:6d} bonds\n'.format(len(s.bonds)))
-    f.write('{:6d} bond types\n'.format(2))
-    f.write('{:6d} angles\n'.format(len(s.angles)))
-    f.write('{:6d} angle types\n'.format(len(s.angle_types)))
-    f.write('{:6d} dihedrals\n'.format(len(s.dihedrals)))
-    f.write('{:6d} dihedral types\n'.format(len(s.dihedral_types)))
-    f.write('{:6d} impropers\n'.format(len(s.impropers)))
-    f.write('{:6d} improper types\n'.format(len(s.improper_types)))
-
-    xlo, xhi = 0.0, s.box[0,0]
-    ylo, yhi = 0.0, s.box[1,1]
-    zlo, zhi = 0.0, s.box[2,2]
-    xy, xz, yz = s.box[0,1], s.box[0,2], s.box[1,2]
-
-    f.write('\n{:10.5f} {:10.5f} xlo xhi\n'.format(xlo, xhi))
-    f.write('{:10.5f} {:10.5f} ylo yhi\n'.format(ylo, yhi))
-    f.write('{:10.5f} {:10.5f} zlo zhi\n'.format(zlo, zhi))
-    f.write('{:10.5f} {:10.5f} {:10.5f} xy xz yz\n'.format(xy, xz, yz))
-
-    f.write('\nMasses\n\n')
-    for i,t in enumerate(lammps_atom_types):
-        if t.startswith('c'):
-            f.write('{:3d} {:10.5f}\t# c2\n'.format(i+1, 12.0112))
-        elif t.startswith('h'):
-            f.write('{:3d} {:10.5f}\t# hc\n'.format(i+1, 1.00797))
-        else:
-            print ('Error writing data file: unknown atom type', t)
-            return None
-
-    f.write('\nAtoms # full\n\n')
-    for i,x in enumerate(s.atoms):
-        t = lammps_atom_types.index(s.forcefield_types[i]) + 1
-        q = s.charges[i]
-        f.write('{:6d} {:6d} {:6d} {:10.5f} {:10.5f} {:10.5f} {:10.5f}\n'.format(
-                i+1, s.molecule[i], t, q, *x))
-
-    f.write('\nBonds\n\n')
-    for i,b in enumerate(s.bonds):
-        if s.atom_types[b[0]] == 'C' and s.atom_types[b[1]] == 'C':
-            bond_type = 1
-        else:
-            bond_type = 2
-        f.write('{:6d} {:4d} {:6d} {:6d}\n'.format(i+1, bond_type, b[0]+1, b[1]+1))
-
-    f.write('\nAngles\n\n')
-    for i,a in enumerate(s.angles):
-        ijk = (i+1 for i in a[1])
-        f.write('{:6d} {:4d} {:6d} {:6d} {:6d}\n'.format(i+1, a[0]+1, *ijk))
-
-    f.write('\nDihedrals\n\n')
-    for i,d in enumerate(s.dihedrals):
-        ijkl = (i+1 for i in d[1])
-        f.write('{:6d} {:4d} {:6d} {:6d} {:6d} {:6d}\n'.format(i+1, d[0]+1, *ijkl))
-
-    f.write('\nImpropers\n\n')
-    for i,im in enumerate(s.impropers):
-        ijkl = (i+1 for i in im[1])
-        f.write('{:6d} {:4d} {:6d} {:6d} {:6d} {:6d}\n'.format(i+1, im[0]+1, *ijkl))
-
-    f.write('\n')
+        rH = self.atom_coords[i] + self._bond_length['CH']*n
+        self._add_atom(self._atom_id, self.atom_chains[i], 'H', rH)
+        self._add_bond(i, self._atom_id)
+        self._atom_id += 1
 
