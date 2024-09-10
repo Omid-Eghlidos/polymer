@@ -1,7 +1,9 @@
 # Ignored file patterns
-#
-# Compiled Python bytecode
+
+# Compiled bytecode
 *.py[cod]
+*.swp
+*.swo
 
 # Results 
 # Folders
@@ -14,4 +16,5 @@ build/
 *.tga
 *.pdf
 *.html
+*.txt
 

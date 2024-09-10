@@ -11,12 +11,12 @@ including generation tools and property computations for various polymers.
 Use the table of contents below to navigate the sections.
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 4
    :caption: Contents:
 
-   introduction
-   generation/index
-   properties/index
+   introduction.rst
+   generation/generate.rst
+   properties/properties.rst
 
 
 Indices and tables
