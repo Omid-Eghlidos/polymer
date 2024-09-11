@@ -140,7 +140,7 @@ class PPAmorphousSystem(AmorphousSystem):
         # Randomly flip the dihedral angles
         self.random_flip = False
         # Types of different forcefield atoms in the system
-        self._forcefield_atom_types = dict(C1=0, C2=1, C3=2, H=3)
+        self._forcefield_types = dict(C1=0, C2=1, C3=2, H=3)
         # Bond-angles of PP in rad (degrees) (Antoniadis, 1998)
         # R-C-C (C3C1C2) = C-C-R (C2C1C3) = 1.9465 rad = 111.5262 deg
         # aC-C-C (C1C2C1) = 1.8778 rad = 107.5900 deg
@@ -154,7 +154,7 @@ class PPAmorphousSystem(AmorphousSystem):
 
         # Add shared attributes from AmorphousSystem
         super().__init__()
-        
+
         # Construct the system with the given size and store its parameters
         self._build_system()
 
@@ -343,8 +343,8 @@ class PPAmorphousSystem(AmorphousSystem):
         # Vector n should point away from average of other bond vectors.
         if dot(n, sum(bond_vec)) > 0:
             n *= -1
-        rH = self.atom_coords[i] + self._bond_length['CH']*n
-        self._add_atom(self._atom_id, self.atom_chains[i], 'H', rH)
+        rH = self.atoms[i][2] + self._bond_length['CH']*n
+        self._add_atom(self._atom_id, self.atoms[i][0], 'H', rH)
         self._add_bond(i, self._atom_id)
         self._atom_id += 1
 

@@ -115,7 +115,7 @@ class PEAmorphousSystem(AmorphousSystem):
         # Randomly flip the dihedral angles
         self.random_flip = False
         # Types of different forcefield atoms in the system
-        self._forcefield_atom_types = dict(C2=0, C3=1, H=2)
+        self._forcefield_types = dict(C2=0, C3=1, H=2)
         # Bond-angles sizes in the amorphous structure in rad
         # C-C-C (C2C2C2) = 1.9548 rad = 112 deg
         # H-C-H (HC2H) = H-C-C (HC2C2) = 1.9024 rad = 109 deg
@@ -125,7 +125,7 @@ class PEAmorphousSystem(AmorphousSystem):
 
         # Add shared attributes from AmorphousSystem
         super().__init__()
-        
+
         # Construct the system with the given size and store its parameters
         self._build_system()
 

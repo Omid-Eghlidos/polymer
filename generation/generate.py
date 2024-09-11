@@ -33,7 +33,6 @@ from generation.pp.crystalline.system import PPCrystallineSystem
 from generation.lib.potential_coefficients import potential_coefficients
 from generation.lib.lammps import write_data_file
 from generation.cg.system import BeadSpringSystem
-from generation.cg.lammps import write_data
 
 
 def generate(material, phase, resolution, settings, verbose=True):
@@ -75,6 +74,7 @@ def generate(material, phase, resolution, settings, verbose=True):
             system = crystalline_cg_system(material, settings.copy(), verbose)
     else:
         raise ValueError('Invalid phase: {phase}')
+    return system
 
 
 def amorphous_aa_system(material, settings, verbose):
@@ -114,7 +114,9 @@ def amorphous_aa_system(material, settings, verbose):
             raise ValueError('Not implemented material: {material}')
         # Specified forcefield potential coefficients for the material
         if 'potential_coeffs' in settings:
-            system.coeffs = potential_coefficients(material, settings['potential_coeffs'])
+            system.coeffs = potential_coefficients(material, 'Amorphous',
+                                                  settings['potential_coeffs'])
+        system.resolution = 'AA'
         system.atoms_format = settings['atoms_format']
         system.output = f'aa_{material}_{settings["Nm"]}m{settings["Nc"]}c_{ns+1:02d}.lammps'
         # Write the system into a file
@@ -154,17 +156,21 @@ def amorphous_cg_system(material, settings, verbose):
                          'Nm': lambda x: x > 0, 'monomer': lambda x: len(x) > 0,
                          'beads': lambda x: len(x) > 0, 'bonds': lambda x: len(x) > 0,
                          'angles': lambda x: len(x) > 0}
+    defaults = dict(atoms_format='molecular')
     # Validate the input settings
-    settings = validate_settings(settings, required, key_types, value_constraints)
+    settings = validate_settings(settings, required, key_types, value_constraints, defaults)
 
     # Generate n random system with the given properties
     for ns in range(settings['Ns']):
         system = BeadSpringSystem(settings)
         system.output = f'cg_{material}_{settings["Nm"]}m{settings["Nc"]}c_{ns+1:02d}.lammps'
         # Write the system into a file
-        write_data(system)
+        system.material = material
+        system.resolution = 'CG'
+        system.atoms_format = settings['atoms_format']
+        write_data_file(system)
         if verbose:
-            verbose_cg_details(ns, system)
+            verbose_cg_details('Amorphous', ns, system)
     return system
 
 
@@ -215,7 +221,9 @@ def crystalline_aa_system(material, settings, verbose):
             raise ValueError('Not implemented material: {material}')
         # Specified forcefield potential coefficients for the material
         if 'potential_coeffs' in settings:
-            system.coeffs = potential_coefficients(material, settings['potential_coeffs'])
+            system.coeffs = potential_coefficients(material, 'Crystalline',
+                                                  settings['potential_coeffs'])
+        system.resolution = 'AA'
         system.atoms_format = settings['atoms_format']
         system.output = f'aa_{material}_{modification}'\
                         f'a{settings["Na"]}b{settings["Nb"]}c{settings["Nc"]}_'\
@@ -270,9 +278,9 @@ def validate_settings(settings, required_keys, key_types, value_constraints, def
 
 def verbose_aa_details(phase, ns, system):
     # Show the system properties on the screen
-    print(f'# Generated {phase} {system.material} system {ns+1} ...')
+    print(f'# Generated {system.resolution} {phase} {system.material} system {ns+1} ...')
     name = {0: 'C', 1: 'H'}
-    atom_types = {a: t + 1 for a, t in system._forcefield_atom_types.items()}
+    atom_types = {a: t + 1 for a, t in system._forcefield_types.items()}
     print(f'---- {system.Nt:>4d} atoms of types:\t{atom_types}')
     bond_types = {name[a[0]]+name[a[1]]: i + 1
                                       for i, a in enumerate(system.bond_types)}
@@ -292,10 +300,10 @@ def verbose_aa_details(phase, ns, system):
     print(f'---- Output: {system.output}\n')
 
 
-def verbose_cg_details(ns, system):
+def verbose_cg_details(phase, ns, system):
     """ Show the details of the system on the screen in verbose mode. """
-    print(f'\n################# Generated System {ns+1} ####################')
-    masses = {t: b[1] for t, b in sorted(system.bead_types.items())}
+    print(f'# Generated {system.resolution} {phase} {system.material} system {ns+1} ...')
+    masses = {b[0]: b[1] for t, b in sorted(system.atom_types.items())}
     masses['System'] = round(system.mass, 3)
     print(f'{"Masses":>10}: {masses} (g/mol)')
     dimensions = {'Box': f'{system.box[0,0]:.3f} x '
@@ -303,26 +311,26 @@ def verbose_cg_details(ns, system):
                          f'{system.box[2,2]:.3f}'}
     dimensions['Volume'] = round(system.volume, 3)
     print(f'{"Dimensions":>10}: {dimensions} (A^3)')
-    beads = {f'{t:^1}': system.Nm * system.Nc
-                                 for t, b in sorted(system.bead_types.items())}
-    beads['Total'] = len(system.beads)
+    beads = {f'{b[0]:^1}': system.Nm * system.Nc
+                                 for t, b in sorted(system.atom_types.items())}
+    beads['Total'] = len(system.atoms)
     print(f'{"Beads":>10}: {beads}')
-    bonds = {t: len([b for b in system.bonds if b[0] == n])
+    bonds = {t: len([b for b in system.bonds if b[0]+1 == n])
                                  for t, n in sorted(system.bond_types.items())}
     bonds['Total'] = len(system.bonds)
     print(f'{"Bonds":>10}: {bonds}')
     if system.angle_types:
-        angles = {t: len([a for a in system.angles if a[0] == n])
+        angles = {t: len([a for a in system.angles if a[0]+1 == n])
                                 for t, n in sorted(system.angle_types.items())}
         angles['Total'] = len(system.angles)
         print(f'{"Angles":>10}: {angles}')
     if system.dihedral_types:
-        dihedrals = {t: len([d for d in system.dihedrals if d[0] == n])
+        dihedrals = {t: len([d for d in system.dihedrals if d[0]+1 == n])
                              for t, n in sorted(system.dihedral_types.items())}
         dihedrals['Total'] = len(system.dihedrals)
         print(f'{"Dihedrals":>10}: {dihedrals}')
     if system.improper_types:
-        impropers = {t: len([i for i in system.impropers if i[0] == n])
+        impropers = {t: len([i for i in system.impropers if i[0]+1 == n])
                              for t, n in sorted(system.improper_types.items())}
         impropers['Total'] = len(system.impropers)
         print(f'{"Impropers":>10}: {impropers}')

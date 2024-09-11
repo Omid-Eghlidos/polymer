@@ -1,0 +1,59 @@
+set input 2m1c_01
+topo readlammpsdata ${input}.lammps
+
+rotate z by 90
+pbc box -center com -color gray
+#pbc wrap -center com
+axes location off
+
+mol addrep 0
+mol addrep 0
+mol addrep 0
+mol addrep 0
+
+mol modselect 0 0 type 1
+mol modselect 1 0 type 2
+mol modselect 2 0 type 3
+mol modselect 3 0 type 4
+
+mol modstyle 0 0 VDW 0.6 24
+mol modstyle 1 0 VDW 0.6 24
+mol modstyle 2 0 VDW 0.6 24
+mol modstyle 3 0 VDW 0.3 24
+mol modstyle 4 0 DynamicBonds 1.6 0.3 12
+
+mol modcolor 0 0 Type
+mol modcolor 1 0 Type
+mol modcolor 2 0 Type
+mol modcolor 3 0 Type
+mol modcolor 4 0 Type
+mol modmaterial 0 0 AOShiny
+mol modmaterial 1 0 AOShiny
+mol modmaterial 2 0 AOShiny
+mol modmaterial 3 0 AOShiny
+mol modmaterial 4 0 AOShiny
+
+color Display Background white
+color Type 1 black
+color Type 2 black
+color Type 3 black
+color Type 4 white
+
+display projection Orthographic
+display shadows on
+display ambientocclusion on
+display depthcue off
+display resetview
+
+scale by 1.0
+
+#display resize 1000 1000
+#render Tachyon vmdscene.dat "/usr/local/lib/vmd/tachyon_LINUXAMD64" -aasamples 24 -fullshade -res 1000 1000 %s -format PNG -o ${input}_ab.png
+
+#rotate x by 90
+#render Tachyon vmdscene.dat "/usr/local/lib/vmd/tachyon_LINUXAMD64" -aasamples 24 -fullshade -res 1000 1000 %s -format PNG -o ${input}_bc.png
+
+#rotate y by 90
+#render Tachyon vmdscene.dat "/usr/local/lib/vmd/tachyon_LINUXAMD64" -aasamples 24 -fullshade -res 1000 1000 %s -format PNG -o ${input}_ac.png
+
+

@@ -37,7 +37,7 @@ class PPCrystallineSystem(CrystallineSystem):
         # Atom types arrangement inside each unit cell chain
         self.unit_types  = ['C3', 'C1', 'C2', 'C3', 'C1', 'C2', 'C3', 'C1', 'C2']
         # List of forcefield type (e.g. 'C2') for each atom.
-        self._forcefield_atom_types = dict(C1=0, C2=1, C3=2, H=3)
+        self._forcefield_types = dict(C1=0, C2=1, C3=2, H=3)
         # Bond-angles of PP in rad (degrees) (Antoniadis, 1998)
         self._angle_size = dict(HCC=1.2800)
 
@@ -238,8 +238,8 @@ class PPCrystallineSystem(CrystallineSystem):
             r  = sin(phi)*u + cos(phi) * (cos(theta)*v + sin(theta)*w)
             assert round(linalg.norm(r), 1) == 1.0
             # Position of a methyl hydrogen
-            rH = self.atom_coords[i] + self._bond_length['CH']*r
-            self._add_atom(self._atom_id, self.atom_chains[i], 'H', rH)
+            rH = self.atoms[i][2] + self._bond_length['CH']*r
+            self._add_atom(self._atom_id, self.atoms[i][0], 'H', rH)
             self._add_bond(i, self._atom_id)
             self._atom_id += 1
 
@@ -273,9 +273,9 @@ class PPCrystallineSystem(CrystallineSystem):
             # Direction of the hydrogen
             n = 1 if j == 0 else -1
             # Position of the gemini hydrogens
-            rH = self.atom_coords[i] +\
+            rH = self.atoms[i][2] +\
                  self._bond_length['CH']*(sin(theta_h/2)*u + n*cos(theta_h/2)*v)
-            self._add_atom(self._atom_id, self.atom_chains[i], 'H', rH)
+            self._add_atom(self._atom_id, self.atoms[i][0], 'H', rH)
             self._add_bond(i, self._atom_id)
             self._atom_id += 1
 
@@ -305,8 +305,8 @@ class PPCrystallineSystem(CrystallineSystem):
         # Vector n should point away from average of other bond vectors.
         if dot(n, sum(bond_vec)) > 0:
             n *= -1
-        rH = self.atom_coords[i] + self._bond_length['CH']*n
-        self._add_atom(self._atom_id, self.atom_chains[i], 'H', rH)
+        rH = self.atoms[i][2] + self._bond_length['CH']*n
+        self._add_atom(self._atom_id, self.atoms[i][0], 'H', rH)
         self._add_bond(i, self._atom_id)
         self._atom_id += 1
 

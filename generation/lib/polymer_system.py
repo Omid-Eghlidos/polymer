@@ -105,10 +105,9 @@ class PolymerSystem():
         # Simulation box
         self.box = numpy.zeros((3, 3))
         # Each atom's type, chain number, charge, and coordinates
-        self.atom_types = -1 * numpy.ones(self.Nt, dtype=numpy.int64)
-        self.atom_chains = -1 * numpy.ones(self.Nt, dtype=numpy.int64)
-        self.atom_charges = -1 * numpy.ones(self.Nt)
-        self.atom_coords = -1 * numpy.ones((self.Nt, 3))
+        self.atoms = []
+        self.atom_types = [-1] * self.Nt
+        self.atom_charges = []
         # Pair bonds and their types
         self.bonds = []
         self.bond_types = []
@@ -150,10 +149,11 @@ class PolymerSystem():
         charge_types : dict
             Dictionary of atom charges.
         """
-        self.atom_chains[atom_id]  = chain_id
-        self.atom_types[atom_id]   = self._forcefield_atom_types[atom_type]
-        self.atom_charges[atom_id] = self._charge_types[atom_type]
-        self.atom_coords[atom_id]  = atom_coords
+        if hasattr(self, '_charge_types'):
+            self.atom_charges.append(self._charge_types[atom_type])
+        atom_type = self._forcefield_types[atom_type]
+        self.atom_types[atom_id] = atom_type
+        self.atoms.append([chain_id, atom_type, atom_coords])
 
     def _add_bond(self, i, j):
         """
@@ -177,7 +177,7 @@ class PolymerSystem():
 
     def __get_bond_type(self, i, j):
         # Bond-types are either C-C (type 0) or C-H (type 1)
-        types = [0 if self.atom_types[k] != self._forcefield_atom_types['H'] else 1
+        types = [0 if self.atom_types[k] != self._forcefield_types['H'] else 1
                                                                for k in [i, j]]
         if types not in self.bond_types:
             self.bond_types.append(types)
@@ -215,8 +215,6 @@ class PolymerSystem():
 
         Parameters
         ----------
-        atom_coords : numpy.ndarray
-            Array of atom coordinates.
         angles : list
             List to store the angles.
         angle_types : list
@@ -249,7 +247,7 @@ class PolymerSystem():
         atom_types : list
             List of atom types.
         """
-        types = [1 if self.atom_types[i] == self._forcefield_atom_types['H']\
+        types = [1 if self.atom_types[i] == self._forcefield_types['H']\
                                                            else 0 for i in ijk]
         # Accounts for ABC -> CBA symmetry of angle types.
         if types[0] > types[2]:
@@ -271,8 +269,6 @@ class PolymerSystem():
             List to store the dihedrals.
         dihedral_types : list
             List to store the dihedral types.
-        atom_coords : numpy.ndarray
-            Array of atom coordinates.
         atom_types : list
             List of atom types.
         """
@@ -300,7 +296,7 @@ class PolymerSystem():
         atom_types : list
             List of atom types.
         """
-        types = [1 if self.atom_types[i] == self._forcefield_atom_types['H']\
+        types = [1 if self.atom_types[i] == self._forcefield_types['H']\
                                                           else 0 for i in ijkl]
         # Possible dihedral types
         # HCCH <=> HCCH
@@ -324,8 +320,6 @@ class PolymerSystem():
             List containing pairs of bonded atoms.
         atom_types : list of int
             List of atom types.
-        atom_coords : numpy.ndarray
-            Array of atom coordinates.
 
         Returns
         -------
@@ -361,7 +355,7 @@ class PolymerSystem():
         tuple
             A tuple containing the improper angle defined by four atom indices and its type.
         """
-        types = sorted([1 if self.atom_types[i] == self._forcefield_atom_types['H']\
+        types = sorted([1 if self.atom_types[i] == self._forcefield_types['H']\
                                                         else 0 for i in ijkl])
         # Possible improper types
         # CCCH <=> HCCC
@@ -396,7 +390,7 @@ class PolymerSystem():
 
         Parameters
         ----------
-        atom_coords : numpy.ndarray
+        atoms : list
             Array of atom coordinates.
         i : int
             Index of the first atom.
@@ -410,7 +404,7 @@ class PolymerSystem():
         numpy.ndarray
             The bond vector.
         """
-        return self._wrap_vector(self.atom_coords[j] - self.atom_coords[i])
+        return self._wrap_vector(self.atoms[j][2] - self.atoms[i][2])
 
     def _wrap_vector(self, dx):
         """
@@ -436,8 +430,6 @@ class PolymerSystem():
 
         Parameters
         ----------
-        atom_coords : numpy.ndarray
-            Array of atom coordinates.
         box : numpy.ndarray
             Array representing the simulation box dimensions.
 
@@ -446,10 +438,10 @@ class PolymerSystem():
         numpy.ndarray
             Array of atom coordinates mapped to the periodic boundary condition.
         """
-        for i in range(len(self.atom_coords)):
+        for i in range(len(self.atoms)):
             for j in range(3):
-                while self.atom_coords[i][j] > self.box[j,j]:
-                    self.atom_coords[i][j] -= self.box[j,j]
-                while self.atom_coords[i][j] < 0:
-                    self.atom_coords[i][j] += self.box[j,j]
+                while self.atoms[i][2][j] > self.box[j,j]:
+                    self.atoms[i][2][j] -= self.box[j,j]
+                while self.atoms[i][2][j] < 0:
+                    self.atoms[i][2][j] += self.box[j,j]
 

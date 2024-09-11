@@ -251,8 +251,8 @@ class AmorphousSystem(PolymerSystem):
             r  = sin(phi)*u + cos(phi)*(cos(theta)*v + sin(theta)*w)
             assert round(linalg.norm(r), 1) == 1.0
             # Position of a methyl hydrogen
-            rH = self.atom_coords[i] + self._bond_length['CH']*r
-            self._add_atom(self._atom_id, self.atom_chains[i], 'H', rH)
+            rH = self.atoms[i][2] + self._bond_length['CH']*r
+            self._add_atom(self._atom_id, self.atoms[i][0], 'H', rH)
             self._add_bond(i, self._atom_id)
             self._atom_id += 1
 
@@ -286,9 +286,9 @@ class AmorphousSystem(PolymerSystem):
             # Direction of the hydrogen
             n = 1 if j == 0 else -1
             # Position of the gemini hydrogens
-            rH = self.atom_coords[i] +\
+            rH = self.atoms[i][2] +\
                  self._bond_length['CH']*(sin(theta_h/2)*u + n*cos(theta_h/2)*v)
-            self._add_atom(self._atom_id, self.atom_chains[i], 'H', rH)
+            self._add_atom(self._atom_id, self.atoms[i][0], 'H', rH)
             self._add_bond(i, self._atom_id)
             self._atom_id += 1
 

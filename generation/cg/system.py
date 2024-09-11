@@ -10,10 +10,10 @@ import numpy
 from numpy import linalg, random, cross, dot
 from scipy.constants import N_A
 from sympy import symbols, Eq, solve
-from math import cos, sin, pi, radians
+from math import cos, pi, radians
 
 
-class BeadSpringSystem:
+class BeadSpringSystem():
     """ Stores bead positions and connectivities and writes to data file.
         Attributes:
         box_length (float): stores the edge length of the simulation box.
@@ -26,15 +26,15 @@ class BeadSpringSystem:
         dihedrals (list): each element stores [dihedral_type, i, j, k, l] """
 
     def __init__(self, settings):
-        """ Initialize an empty system. """
-        self.Nc               = settings['Nc']
-        self.Nm               = settings['Nm']
-        self.Nt               = len(settings['beads']) * self.Nm * self.Nc
+        # Dynamically update instance attributes with settings values
+        self.__dict__.update(settings)
+
+        self.Nt               = len(self.beads) * self.Nm * self.Nc
         self.mass             = 0
         self.volume           = 0
         self.box              = numpy.zeros((3,3))
-        self.beads            = []
-        self.bead_types       = {}
+        self.atoms            = []
+        self.atom_types       = {}
         self.bonds            = []
         self.bond_types       = {}
         self.angles           = []
@@ -44,9 +44,8 @@ class BeadSpringSystem:
         self.impropers        = []
         self.improper_types   = {}
 
-        self._rho             = settings['rho']
-        self._bond_table      = [[] for _ in range(self.Nt)]
-        self._types           = dict(beads={}, bonds={}, angles={})
+        self._bond_table       = [[] for _ in range(self.Nt)]
+        self._forcefield_types = dict(beads={}, bonds={}, angles={})
 
         self.__monomer        = {}
         self.__chain          = ''
@@ -57,7 +56,7 @@ class BeadSpringSystem:
         self.__bond_length    = {}
         self.__angle_size     = {}
 
-        self.__parse_SMILES(settings['monomer'])
+        self.__parse_SMILES()
         self.__initialize_structural_parameters(settings)
         self._build_system()
 
@@ -67,29 +66,24 @@ class BeadSpringSystem:
         distribution function for each of the structural distributions to be drawn from
         if "random" was specified for it, otherwise set their specified fix values.
         """
-        self._types['beads'] = {t: b for t, b in settings['beads'].items()}
+        self._forcefield_types['beads'] = {t: b for t, b in settings['beads'].items()}
         for b in settings['bonds']:
-            self._types['bonds'][b] = settings['bonds'][b][0]
+            self._forcefield_types['bonds'][b] = settings['bonds'][b][0]
             try:
                 self.__bond_length[b] = float(settings['bonds'][b][1])
             except:
                 self.__bond_length[b] = self.__compute_CDF(settings['bonds'][b][1])
         if settings['angles']:
             for a in settings['angles']:
-                self._types['angles'][a] = settings['angles'][a][0]
+                self._forcefield_types['angles'][a] = settings['angles'][a][0]
                 try:
                     self.__angle_size[a] = float(settings['angles'][a][1])
                 except:
                     self.__angle_size[a] = self.__compute_CDF(settings['angles'][a][1])
 
-    def __parse_SMILES(self, smiles: str):
+    def __parse_SMILES(self):
         """
         Parses the SMILES string to separate backbone and branches.
-
-        Parameters:
-        -----------
-        smiles : str
-            Input SMILES notation of the polymer system.
 
         Returns:
         --------
@@ -102,7 +96,8 @@ class BeadSpringSystem:
         --------
         A(C)B -> Backbone: 'AB', Branches: [('A', 'C')]
         """
-
+        # Input SMILES notation of the polymer system.
+        smiles = self.monomer
         backbone = ""
         branches = []
         i = 0
@@ -126,27 +121,27 @@ class BeadSpringSystem:
 
     def _build_system(self):
         """ Creates a bead spring system. """
-        self.__create_simulation_box()
-        self.__add_beads()
-        self.__construct_bond_table()
+        self._create_simulation_box()
+        self._add_atom()
+        self._construct_bond_table()
         self.__add_angles()
         self.__add_dihedrals()
         self.__add_impropers()
 
-    def __create_simulation_box(self):
+    def _create_simulation_box(self):
         """ Create an orthogonal simulation box for the specified sizes for the system. """
         # Mass of each chain of the system
-        chain_mass = sum([self.Nm*bead[1] for bead in self._types['beads'].values()])
+        chain_mass = sum([self.Nm*bead[1] for bead in self._forcefield_types['beads'].values()])
         # Total mass of the system
         self.mass = self.Nc * chain_mass
         # Volume of the system for the given density in Angstrom^3
         # To convert from g/cm^3 to g/A^3 should divide by 10^24
-        self.volume = (self.mass/N_A) / (self._rho/1e24)
+        self.volume = (self.mass/N_A) / (self.rho/1e24)
         # Orthogonal box dimension
         for k in range(3):
             self.box[k,k] = self.volume**(1.0/3.0)
 
-    def __add_beads(self):
+    def _add_atom(self):
         """ First go over backbone beads and add them, then add the branch beads. """
         for nc in range(self.Nc):
             self.__add_backbones(nc)
@@ -159,9 +154,10 @@ class BeadSpringSystem:
                 elif b in self.__monomer['branch']:
                     coords = self.__branches[nc][branch_id]
                     branch_id += 1
-                if b not in self.bead_types:
-                    self.bead_types[b] = self._types['beads'][b]
-                self.beads.append([nc+1, self.bead_types[b][0], *coords])
+                atom = self._forcefield_types['beads'][b]
+                if atom[0] not in self.atom_types:
+                    self.atom_types[atom[0]-1] = [b, atom[1]]
+                self.atoms.append([nc, atom[0]-1, coords])
 
     def __add_backbones(self, nc):
         """ Traverse over all the backbone beads and determine their position randomly. """
@@ -291,8 +287,7 @@ class BeadSpringSystem:
     def __add_bond(self, i, j):
         """ Add bonds between the two beads i and j. """
         bond_type = self.__get_bond_type(i, j)
-        i, j = sorted([i, j])
-        self.bonds.append([self.bond_types[bond_type], i, j])
+        self.bonds.append((self.bond_types[bond_type]-1, sorted([i, j])))
 
     def __get_bond_type(self, i, j):
         """ Return a bond type between two beads. """
@@ -300,9 +295,9 @@ class BeadSpringSystem:
         type_j = self.__system[j]
         bond_type = ''.join(sorted(type_i + type_j))
         # Ensure the found type is an specified type
-        assert bond_type in self._types['bonds'], f'Undefined type found: {bond_type}'
+        assert bond_type in self._forcefield_types['bonds'], f'Undefined type found: {bond_type}'
         if bond_type not in self.bond_types:
-            self.bond_types[bond_type] = self._types['bonds'][bond_type]
+            self.bond_types[bond_type] = self._forcefield_types['bonds'][bond_type]
         return bond_type
 
     def __get_bond_length(self, i, j):
@@ -313,13 +308,13 @@ class BeadSpringSystem:
         except:
             return self.__random_distribution_value(self.__bond_length[bond_type])
 
-    def __construct_bond_table(self):
+    def _construct_bond_table(self):
         """
         Create a table where each row contains atoms bonded to an atom with ID
         as the row number.
         """
         for b in self.bonds:
-            i, j = b[1:]
+            i, j = b[1]
             self._bond_table[i].append(j)
             self._bond_table[j].append(i)
         for bond in self._bond_table:
@@ -343,7 +338,7 @@ class BeadSpringSystem:
         Function for adding angles to the system.
         """
         angle_type = self.__get_angle_type(i, j, k)
-        self.angles.append([self.angle_types[angle_type], i, j, k])
+        self.angles.append((self.angle_types[angle_type]-1, [i, j, k]))
 
     def __get_angle_type(self, i, j, k):
         """ Return the angle type between i, j, k """
@@ -354,10 +349,11 @@ class BeadSpringSystem:
         if angle_type[0] > angle_type[-1]:
             angle_type = angle_type[::-1]
         # If the angle types are specified in the input, the found type should be one
-        if self._types['angles']:
-            assert angle_type in self._types['angles'], f'Undefined type found: {angle_type}'
+        if self._forcefield_types['angles']:
+            assert angle_type in self._forcefield_types['angles'],\
+                                        f'Undefined type found: {angle_type}'
             if angle_type not in self.angle_types:
-                self.angle_types[angle_type] = self._types['angles'][angle_type]
+                self.angle_types[angle_type] = self._forcefield_types['angles'][angle_type]
             return angle_type
         if angle_type not in self.angle_types:
             self.angle_types[angle_type] = len(self.angle_types) + 1
@@ -376,9 +372,9 @@ class BeadSpringSystem:
         Traverses the bond list and defines all the dihedral torsion angles.
         """
         for b in self.bonds:
-            j, k = b[1:]
-            bonded_j = [i for i in self._bond_table[b[1]] if i != b[2]]
-            bonded_k = [i for i in self._bond_table[b[2]] if i != b[1]]
+            j, k = b[1]
+            bonded_j = [i for i in self._bond_table[j] if i != k]
+            bonded_k = [i for i in self._bond_table[k] if i != j]
             for i in bonded_j:
                 for l in bonded_k:
                     self.__add_dihedral(i, j, k, l)
@@ -388,7 +384,7 @@ class BeadSpringSystem:
         Function for adding dihedral torsion angles to the system.
         """
         dihedral_type = self.__get_dihedral_type(i, j, k, l)
-        self.dihedrals.append([self.dihedral_types[dihedral_type], i, j, k, l])
+        self.dihedrals.append((self.dihedral_types[dihedral_type]-1, [i, j, k, l]))
 
     def __get_dihedral_type(self, i, j, k, l):
         """ Return the dihedral type between i, j, k, l """
@@ -430,7 +426,7 @@ class BeadSpringSystem:
         Function for adding improper angles to the system.
         """
         improper_type = self.__get_improper_type(i, j, k, l)
-        self.impropers.append([self.improper_types[improper_type], i, j, k, l])
+        self.impropers.append((self.improper_types[improper_type], [i, j, k, l]))
 
     def __get_improper_type(self, i, j, k, l):
         """ Return the improper type between i, j, k and l """

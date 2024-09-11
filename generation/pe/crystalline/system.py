@@ -36,7 +36,7 @@ class PECrystallineSystem(CrystallineSystem):
         # Atom types arrangement inside each unit cell chain
         self.unit_types  = ['C2', 'H', 'H', 'C2', 'H', 'H']
         # List of forcefield type (e.g. 'C2') for each atom
-        self._forcefield_atom_types = dict(C2=0, H=1)
+        self._forcefield_types = dict(C2=0, H=1)
 
         # Add shared attributes from CrystallineSystem
         super().__init__()
