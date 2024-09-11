@@ -17,4 +17,6 @@ build/
 *.pdf
 *.html
 *.txt
+*.ini
+*.data
 
