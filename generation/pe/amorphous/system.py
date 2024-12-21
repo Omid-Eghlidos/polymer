@@ -5,10 +5,10 @@ system.py
 This module defines the `PEAmorphousSystem` class, which is used to create and
 manage an amorphous polyethylene (PE) system for molecular simulations.
 
-The `PEAmorphousSystem` class is a subclass of `PolymerSystem` and provides
+The `PEAmorphousSystem` class is a subclass of `AmorphousAlkeneSystem` and provides
 specific implementations for constructing an amorphous PE system, including
-adding backbone and methyl carbons, and adding various types of hydrogens
-specific to the PE system.
+adding backbone and methyl carbons, adding various types of hydrogens, and
+building the system by integrating key structural elements.
 
 Classes
 -------
@@ -33,18 +33,23 @@ _add_initiator(self, i, bond_vec)
 _add_terminator(self, i, bond_vec)
     Adds a hydrogen atom as a terminator to the last carbon.
 
+_build_system(self)
+    Constructs the complete polymer system, integrating carbon and hydrogen atoms,
+    angles, and dihedrals for simulation.
+
 Dependencies
 ------------
-- generation.lib.polymer_system
+- generation.lib.amorphous_alkene_system
+- generation.lib.potential_coefficients
 """
 
 
 import numpy
-from generation.lib.amorphous_system import AmorphousSystem
+from generation.lib.amorphous_alkene_system import AmorphousAlkeneSystem
 from generation.lib.potential_coefficients import potential_coefficients
 
 
-class PEAmorphousSystem(AmorphousSystem):
+class PEAmorphousSystem(AmorphousAlkeneSystem):
     """
     A class to represent an amorphous polyethylene (PE) system.
 
@@ -53,6 +58,12 @@ class PEAmorphousSystem(AmorphousSystem):
 
     Attributes
     ----------
+    resolution : str
+        The resolution of the generated system.
+    material : str
+        The name of the material that is being generated.
+    rho : float
+        Experimental density of the material.
     Nc : int
         Number of chains per system.
     Nm : int
@@ -75,10 +86,10 @@ class PEAmorphousSystem(AmorphousSystem):
     __init__(self, Nc, Nm, random_variation=True)
         Initializes the PEAmorphousSystem with specific settings.
 
-    _add_carbons(self)
+    _add_carbon_atoms(self)
         Adds backbone and methyl carbons specific to the PE system.
 
-    _add_hydrogens(self)
+    _add_hydrogen_atoms(self)
         Adds hydrogen atoms specific to the PE system.
 
     _add_initiator(self, i, bond_vec)
@@ -86,6 +97,10 @@ class PEAmorphousSystem(AmorphousSystem):
 
     _add_terminator(self, i, bond_vec)
         Adds a hydrogen atom as a terminator to the last carbon.
+
+    _build_system(self)
+        Constructs the complete polymer system, integrating carbon and hydrogen atoms,
+        angles, and dihedrals for simulation.
     """
     def __init__(self, settings):
         """
@@ -99,10 +114,12 @@ class PEAmorphousSystem(AmorphousSystem):
         # Add the settings variable as attributes
         self.__dict__.update(settings)
 
+        # Resolution of the system
+        self.resolution = 'AA'
         # Material name
         self.material = 'PE'
         # Density of the amorphous system (g/cm^3)
-        self.rho = 0.865
+        self.rho = 0.85
         # PE monomer has 6 atoms: 2 Carbons and 4 Hydrogens
         # Number of Carbon atoms in each PE monomer
         self.N_C = 2
@@ -114,20 +131,29 @@ class PEAmorphousSystem(AmorphousSystem):
         self.random_variation = True
         # Randomly flip the dihedral angles
         self.random_flip = False
-        # Types of different forcefield atoms in the system
-        self._forcefield_types = dict(C2=0, C3=1, H=2)
-        # Bond-angles sizes in the amorphous structure in rad
-        # C-C-C (C2C2C2) = 1.9548 rad = 112 deg
-        # H-C-H (HC2H) = H-C-C (HC2C2) = 1.9024 rad = 109 deg
-        self._angle_size = dict(CCC=1.9548, HCC=1.9024)
-        # Dihedral angles
-        self._dihedral_size = [numpy.pi]
 
-        # Add shared attributes from AmorphousSystem
+        # Add shared attributes from AmorphousAlkeneSystem
         super().__init__()
 
+        # Initialize various parameters for the system
+        self._initialize_system_parameters()
         # Construct the system with the given size and store its parameters
         self._build_system()
+
+    def _initialize_system_parameters(self):
+        """
+        Initialize system's constant parameters including forcefield types including for
+        atoms, bonds, angles, dihedrals, and impropers.
+        """
+        # Forcefield unique types for atoms, bonds, angles, torsions, and impropers
+        self._ff_types['atoms']   = dict(C2=0, C3=1, H=2)
+        self._identify_unique_bond_types()
+        # Bond-angles sizes in the amorphous structure in rad
+        # C-C-C (C2C2C2) = 1.9548 rad = 112 deg
+        # H-C-H (HC2H) = H-C-C (HC2C2) = C-C-H (C2C2H) = 1.9024 rad = 109 deg
+        self._ff_sizes['angles'] = dict(CCC=1.9548, HCC=1.9024)
+        # Dihedral angles
+        self._ff_sizes['torsions'] = [numpy.pi]
 
     def _build_system(self):
         """
@@ -172,19 +198,20 @@ class PEAmorphousSystem(AmorphousSystem):
                 if i == 0:
                     # After adding a hydrogen as a terminator C2 becomes C3
                     self._add_atom(atom_id, nc, 'C3', self._backbones[2*i])
-                    self._add_bond(atom_id, atom_id+1)
                 else:
                     # Add the 1st gemini Carbon of the monomer
                     self._add_atom(atom_id, nc, 'C2', self._backbones[2*i])
-                    self._add_bond(atom_id, atom_id+1)
+                    self._add_bond(atom_id-1, atom_id)
+                atom_id += 1
                 if i == self.Nm - 1:
                     # After adding a hydrogen as a terminator C2 becomes C3 and
-                    self._add_atom(atom_id+1, nc, 'C3', self._backbones[2*i+1])
+                    self._add_atom(atom_id, nc, 'C3', self._backbones[2*i+1])
+                    self._add_bond(atom_id-1, atom_id)
                 else:
                     # Add the 2nd gemini Carbon of the monomer
-                    self._add_atom(atom_id+1, nc, 'C2', self._backbones[2*i+1])
-                    self._add_bond(atom_id+1, atom_id+2)
-                atom_id += 2
+                    self._add_atom(atom_id, nc, 'C2', self._backbones[2*i+1])
+                    self._add_bond(atom_id-1, atom_id)
+                atom_id += 1
         self._atom_id += atom_id
         self._construct_bond_table()
 

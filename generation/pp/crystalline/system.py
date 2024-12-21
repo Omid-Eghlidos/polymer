@@ -1,22 +1,173 @@
+"""
+system.py
+=========
 
+This module defines the `PPCrystallineSystem` class, which is used to create and
+manage a crystalline polypropylene (PP) system for molecular simulations.
+
+The `PPCrystallineSystem` class is a subclass of `CrystallineAlkeneSystem` and provides
+specific implementations for constructing crystalline PP systems, including support
+for alpha and beta modifications, adding backbone and methyl carbons, and managing
+hydrogens for various molecular configurations.
+
+Classes
+-------
+PPCrystallineSystem
+    A subclass of `CrystallineAlkeneSystem` that provides specific implementations for
+    constructing crystalline PP systems with alpha and beta modifications.
+
+Methods
+-------
+__init__(self, settings)
+    Initialize the settings and call the parent `CrystallineAlkeneSystem` constructor.
+
+_initialize_system_parameters(self)
+    Initialize system parameters such as forcefield types, bond angles, and torsions.
+
+_build_system(self)
+    Generate the polymer system, including atoms, bonds, angles, dihedrals, and impropers.
+
+_unit_cell(self)
+    Defines the unit cell structure based on alpha or beta modification.
+
+_space_group(self)
+    Applies space group symmetry operations based on alpha or beta modification.
+
+__monoclinic(self)
+    Returns parameters for the monoclinic unit cell of the alpha modification.
+
+__hexagonal(self)
+    Returns parameters for the hexagonal unit cell of the beta modification.
+
+__C2_c(self)
+    Constructs fractional coordinates of chains in the alpha modification.
+
+__P31_21(self)
+    Constructs fractional coordinates of chains in the beta modification.
+
+__full_carbon_chain(self, CC, i)
+    Generates a full carbon chain for the beta modification using symmetry operations.
+
+_add_hydrogen_atoms(self)
+    Adds hydrogen atoms specific to the PP system.
+
+_add_methyl_hydrogens(self, i, bond_vec)
+    Adds methyl hydrogens to each methyl carbon (C3).
+
+_add_gemini_hydrogens(self, i, bond_vec)
+    Adds gemini hydrogens to each achiral/gemini carbon (C2).
+
+__add_chiral_hydrogen(self, i, bond_vec)
+    Adds a chiral/pendant hydrogen to each chiral carbon (C1).
+
+Dependencies
+------------
+- numpy
+- math
+- generation.lib.crystalline_alkene_system
+"""
 
 import numpy
 from numpy import linalg, cross, dot
 from math import cos, sin, pi, radians
-from generation.lib.crystalline_system import CrystallineSystem
+from generation.lib.crystalline_alkene_system import CrystallineAlkeneSystem
 
 
-class PPCrystallineSystem(CrystallineSystem):
+class PPCrystallineSystem(CrystallineAlkeneSystem):
+    """
+    A class to represent a crystalline polypropylene (PP) system.
+
+    This class inherits from `CrystallineAlkeneSystem` and provides specific
+    implementations for constructing crystalline PP systems. It supports alpha
+    and beta modifications with unique molecular configurations and unit cells.
+
+    Attributes
+    ----------
+    resolution : str
+        Resolution of the generated material.
+    material : str
+        Name of the material being generated (default: 'iPP').
+    N_C : int
+        Number of Carbon atoms per monomer.
+    N_H : int
+        Number of Hydrogen atoms per monomer.
+    N_m : int
+        Number of monomers per chain.
+    N_c : int
+        Number of chains per unit cell, varies by modification type.
+    Nt : int
+        Total number of atoms in the system.
+    bond_offsets : list
+        Bond offsets for atoms between unit cells.
+    unit_types : list
+        Atom types arrangement within each unit cell chain.
+    system_types : list
+        Atomic symbol types for the entire system, including hydrogens.
+
+    Methods
+    -------
+    __init__(self, settings)
+        Initializes the `PPCrystallineSystem` with specific settings.
+
+    _initialize_system_parameters(self)
+        Initializes forcefield parameters such as bond angles and torsions.
+
+    _build_system(self)
+        Generates the polymer system by defining atoms, bonds, angles, and torsions.
+
+    _unit_cell(self)
+        Defines the unit cell structure based on the alpha or beta modification.
+
+    _space_group(self)
+        Applies space group symmetry operations to construct unit cells.
+
+    __monoclinic(self)
+        Provides parameters for the monoclinic unit cell of the alpha modification.
+
+    __hexagonal(self)
+        Provides parameters for the hexagonal unit cell of the beta modification.
+
+    __C2_c(self)
+        Constructs fractional coordinates for alpha modification chains.
+
+    __P31_21(self)
+        Constructs fractional coordinates for beta modification chains.
+
+    __full_carbon_chain(self, CC, i)
+        Generates a full carbon chain using symmetry operations for beta modification.
+
+    _add_hydrogen_atoms(self)
+        Adds hydrogen atoms specific to the PP system.
+
+    _add_methyl_hydrogens(self, i, bond_vec)
+        Adds three hydrogens to each methyl carbon (C3).
+
+    _add_gemini_hydrogens(self, i, bond_vec)
+        Adds two hydrogens to each gemini carbon (C2).
+
+    __add_chiral_hydrogen(self, i, bond_vec)
+        Adds a chiral/pendant hydrogen to each chiral carbon (C1).
+    """
     def __init__(self, settings):
+        """
+        Initialize the PPCrystallineSystem with the provided settings.
+
+        Parameters
+        ----------
+        settings : dict
+            Input settings for generating the crystalline PP system.
+        """
         # Dynamically update instance attributes with settings values
         self.__dict__.update(settings)
 
+        # Resolution of the generated system
+        self.resolution = 'AA'
         # Add the material name
         self.material = 'iPP'
         # PP monomer has 9 atoms: 3 Carbons and 6 Hydrogens
         # Number of Carbon atoms in each PP monomer
         self.N_C = 3
-        # Number of Hydrogen atoms in each PE monomer
+        # Number of Hydrogen atoms in each PP monomer
         self.N_H = 6
         # Number of monomers per chain
         self.N_m = 3
@@ -36,20 +187,51 @@ class PPCrystallineSystem(CrystallineSystem):
         self.bond_offsets = [1, 1, 2, 1, 1, 2, 1, 1, 2]
         # Atom types arrangement inside each unit cell chain
         self.unit_types  = ['C3', 'C1', 'C2', 'C3', 'C1', 'C2', 'C3', 'C1', 'C2']
-        # List of forcefield type (e.g. 'C2') for each atom.
-        self._forcefield_types = dict(C1=0, C2=1, C3=2, H=3)
-        # Bond-angles of PP in rad (degrees) (Antoniadis, 1998)
-        self._angle_size = dict(HCC=1.2800)
+        # Find the system atomic symbole types
+        # Given the initial fractional coordinates, first add all the Carbons
+        self.system_types = self.unit_types * self.N_c * self.Na * self.Nb * self.Nc
+        # Then add all the Hydrogens
+        Nt_H = self.N_H * self.N_m * self.N_c * self.Na * self.Nb * self.Nc
+        self.system_types += ['H' for _ in range(Nt_H)]
 
-        # Add shared attributes from CrystallineSystem
+        # Add shared attributes from CrystallineAlkeneSystem
         super().__init__()
 
+        # Initialize various parameters for the system
+        self._initialize_system_parameters()
         # Construct the system with the given size and store its parameters
         self._build_system()
+
+    def _initialize_system_parameters(self):
+        """
+        Initialize forcefield parameters including bond angles and torsions.
+
+        This method sets the forcefield atom types, unique bond types, and
+        angle/torsion parameters specific to the PP system.
+        """
+        # Forcefield unique types for atoms, bonds, angles, torsions, and impropers
+        self._ff_types['atoms'] = dict(C1=0, C2=1, C3=2, H=3)
+        self._identify_unique_bond_types()
+        # Bond-angles of PP in rad (degrees) (Antoniadis, 1998)
+        self._ff_sizes['angles'] = dict(HCC=1.2800)
+        # Dihedral angles
+        self._ff_sizes['torsions'] = [numpy.pi]
 
     def _build_system(self):
         """
         Generate the polymer system with specified parameters.
+
+        This method constructs a polymer system containing chains of monomers
+        by adding atoms, bonds, angles, torsions, and impropers. Steps include:
+
+        - Creating the simulation box.
+        - Adding carbon atoms.
+        - Adding hydrogen atoms.
+        - Defining bond angles and torsions.
+
+        Returns
+        -------
+        None
         """
         self._create_simulation_box()
         self._add_carbon_atoms()
@@ -60,7 +242,15 @@ class PPCrystallineSystem(CrystallineSystem):
 
     def _unit_cell(self):
         """
-        Columns of unit cell are the fractional coordinate (a, b, and c).
+        Defines the unit cell structure for crystalline PP.
+
+        This method determines the unit cell parameters based on the modification
+        type (alpha or beta).
+
+        Returns
+        -------
+        numpy.ndarray
+            Unit cell dimensions for alpha or beta modification.
         """
         if self.modification == 'alpha':
             return self.__monoclinic()
@@ -69,7 +259,15 @@ class PPCrystallineSystem(CrystallineSystem):
 
     def _space_group(self):
         """
-        Adding chains in a unit cell using space group symmetry operations.
+        Applies space group symmetry operations for unit cell construction.
+
+        This method determines the space group operations based on the
+        modification type (alpha or beta).
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            Fractional coordinates for all chains in the unit cell.
         """
         if self.modification == 'alpha':
             return self.__C2_c()
@@ -78,8 +276,13 @@ class PPCrystallineSystem(CrystallineSystem):
 
     def __monoclinic(self):
         """
-        Parameters for monoclinic unit cell of the alpha modification of crystalline PP.
+        Parameters for monoclinic unit cell of the alpha modification.
         Refer to G. Natta et. al. (1959).
+
+        Returns
+        -------
+        numpy.ndarray
+            Dimensions of the monoclinic unit cell.
         """
         beta = 99.5 * numpy.pi / 180.0
         return numpy.array([[6.63,  0.00, 6.50*numpy.cos(beta)],
@@ -90,6 +293,11 @@ class PPCrystallineSystem(CrystallineSystem):
         """
         Parameters for hexagonal unit cell of the beta modification of crystalline PP.
         Refer to Dino R. Ferro et al. (1998).
+
+        Returns
+        -------
+        numpy.ndarray
+            Dimensions of the hexagonal unit cell.
         """
         gamma = 120.0 * numpy.pi / 180.0
         return numpy.array([[11.03, 11.03*numpy.cos(gamma), 0.00],
@@ -238,7 +446,7 @@ class PPCrystallineSystem(CrystallineSystem):
             r  = sin(phi)*u + cos(phi) * (cos(theta)*v + sin(theta)*w)
             assert round(linalg.norm(r), 1) == 1.0
             # Position of a methyl hydrogen
-            rH = self.atoms[i][2] + self._bond_length['CH']*r
+            rH = self.atoms[i][2] + self._ff_sizes['bonds']['CH']*r
             self._add_atom(self._atom_id, self.atoms[i][0], 'H', rH)
             self._add_bond(i, self._atom_id)
             self._atom_id += 1
@@ -268,13 +476,13 @@ class PPCrystallineSystem(CrystallineSystem):
         v = self._normalized(cross(bi, bj))
 
         # Angle between the gemini hydrogens connected to the C2 in radian
-        theta_h = self._angle_size['HCC']
+        theta_h = self._ff_sizes['angles']['HCC']
         for j in range(2):
             # Direction of the hydrogen
             n = 1 if j == 0 else -1
             # Position of the gemini hydrogens
             rH = self.atoms[i][2] +\
-                 self._bond_length['CH']*(sin(theta_h/2)*u + n*cos(theta_h/2)*v)
+                 self._ff_sizes['bonds']['CH']*(sin(theta_h/2)*u + n*cos(theta_h/2)*v)
             self._add_atom(self._atom_id, self.atoms[i][0], 'H', rH)
             self._add_bond(i, self._atom_id)
             self._atom_id += 1
@@ -305,7 +513,7 @@ class PPCrystallineSystem(CrystallineSystem):
         # Vector n should point away from average of other bond vectors.
         if dot(n, sum(bond_vec)) > 0:
             n *= -1
-        rH = self.atoms[i][2] + self._bond_length['CH']*n
+        rH = self.atoms[i][2] + self._ff_sizes['bonds']['CH']*n
         self._add_atom(self._atom_id, self.atoms[i][0], 'H', rH)
         self._add_bond(i, self._atom_id)
         self._atom_id += 1

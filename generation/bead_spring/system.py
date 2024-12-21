@@ -1,10 +1,74 @@
 #!/usr/bin/env python3
 """
-Goal
------
-Generates the CG system using bead-spring model given the input parameters.
-"""
+system.py
+=========
 
+This module defines the `BeadSpringSystem` class, which is used to create and
+manage a coarse-grained (CG) polymer system using a bead-spring model for molecular
+simulations. It supports generating the CG system from SMILES strings, adding atoms,
+defining bonds, angles, dihedrals, and impropers, and writing the system to a data file.
+
+Classes
+-------
+BeadSpringSystem
+    A class for creating and managing a coarse-grained polymer system.
+
+Methods
+-------
+__init__(self, settings)
+    Initializes the system with the given settings.
+
+__parse_SMILES(self)
+    Parses the SMILES string to extract the backbone and branches of the polymer.
+
+_initialize_structural_parameters(self, settings)
+    Initializes structural parameters for beads, bonds, and angles.
+
+_build_system(self)
+    Constructs the complete bead-spring system by adding atoms, bonds, angles,
+dihedrals, and impropers.
+
+_create_simulation_box(self)
+    Creates an orthogonal simulation box based on the system density and mass.
+
+_add_atom(self)
+    Adds backbone and branch beads to the system.
+
+__add_backbones(self, nc)
+    Determines positions of backbone beads for a given chain.
+
+__add_branches(self, nc)
+    Adds branch beads connected to the backbone beads.
+
+__compute_CDF(self, path)
+    Computes the cumulative distribution function (CDF) from a probability
+distribution function (PDF).
+
+__random_distribution_value(self, CDF)
+    Samples a random value from the cumulative distribution function (CDF).
+
+__random_bond_vector(self, i, j)
+    Returns a random bond vector for a bond between beads of specific types.
+
+__add_bond(self, i, j)
+    Adds a bond between two specified beads.
+
+__add_angles(self)
+    Defines angles between connected atoms in the bond table.
+
+__add_dihedrals(self)
+    Defines dihedral torsion angles in the system.
+
+__add_impropers(self)
+    Identifies and adds improper torsion angles in the system.
+
+Dependencies
+------------
+- numpy
+- scipy.constants
+- sympy
+- math
+"""
 
 import numpy
 from numpy import linalg, random, cross, dot
@@ -14,21 +78,91 @@ from math import cos, pi, radians
 
 
 class BeadSpringSystem():
-    """ Stores bead positions and connectivities and writes to data file.
-        Attributes:
-        box_length (float): stores the edge length of the simulation box.
-        beads (list): each element stores [mol, bead_type, [x,y,z]].
-        bead_masses (list): each element stores the bead mass (float).
-        bonds (list): each element stores [bond_type, i, j].
-        angle_types (list): each element stores the angle type (int).
-        angles (list): each elemen tstores [angle_type, i, j, k].
-        dihedrla_types (list): each element stores the dihedral type (int)
-        dihedrals (list): each element stores [dihedral_type, i, j, k, l] """
+    """
+    A class to represent a coarse-grained (CG) polymer system using a bead-spring model.
 
+    This class supports generating the CG system from SMILES strings, defining
+    structural parameters, and adding atoms, bonds, angles, dihedrals, and impropers.
+
+    Attributes
+    ----------
+    box_length : float
+        Edge length of the simulation box.
+    beads : list
+        Each element stores [molecule_id, bead_type, [x, y, z]].
+    bead_masses : list
+        Masses of individual beads (float).
+    bonds : list
+        Each element stores [bond_type, bead1_index, bead2_index].
+    angles : list
+        Each element stores [angle_type, bead1_index, bead2_index, bead3_index].
+    dihedrals : list
+        Each element stores [dihedral_type, bead1_index, bead2_index, bead3_index, bead4_index].
+    impropers : list
+        Each element stores [improper_type, bead1_index, bead2_index, bead3_index, bead4_index].
+
+    Methods
+    -------
+    __init__(self, settings)
+        Initializes the system with the given settings.
+
+    __parse_SMILES(self)
+        Parses the SMILES string to extract backbone and branches.
+
+    _initialize_structural_parameters(self, settings)
+        Initializes forcefield parameters for beads, bonds, angles, and their distributions.
+
+    _build_system(self)
+        Constructs the bead-spring system by adding atoms, bonds, angles, dihedrals,
+        and impropers.
+
+    _create_simulation_box(self)
+        Creates an orthogonal simulation box based on the system density and mass.
+
+    _add_atom(self)
+        Adds atoms to the system, including backbone and branch beads.
+
+    __add_backbones(self, nc)
+        Determines the positions of backbone beads for a given chain index.
+
+    __add_branches(self, nc)
+        Adds branch beads and connects them to backbone beads.
+
+    __compute_CDF(self, path)
+        Computes the cumulative distribution function (CDF) from a probability
+        distribution function (PDF).
+
+    __random_distribution_value(self, CDF)
+        Samples a random value from the cumulative distribution function (CDF).
+
+    __random_bond_vector(self, i, j)
+        Generates a random bond vector for a bond between two beads.
+
+    __add_bond(self, i, j)
+        Adds a bond between two beads, ensuring type consistency.
+
+    __add_angles(self)
+        Defines angles between connected beads in the bond table.
+
+    __add_dihedrals(self)
+        Defines dihedral torsion angles in the system.
+
+    __add_impropers(self)
+        Identifies and adds improper torsion angles.
+    """
     def __init__(self, settings):
+        """
+        Initializes the BeadSpringSystem with the given settings.
+
+        Parameters
+        ----------
+        settings : dict
+            A dictionary containing input settings for generating the CG system.
+        """
         # Dynamically update instance attributes with settings values
         self.__dict__.update(settings)
 
+        self.resolution       = 'CG'
         self.Nt               = len(self.beads) * self.Nm * self.Nc
         self.mass             = 0
         self.volume           = 0

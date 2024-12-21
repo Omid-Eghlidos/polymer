@@ -106,7 +106,7 @@ class PolymerSystem():
         self.box = numpy.zeros((3, 3))
         # Each atom's type, chain number, charge, and coordinates
         self.atoms = []
-        self.atom_types = [-1] * self.Nt
+        self.atom_types = []
         self.atom_charges = []
         # Pair bonds and their types
         self.bonds = []
@@ -121,6 +121,13 @@ class PolymerSystem():
         # Impropers (four bonded atoms) and their types
         self.impropers = []
         self.improper_types = []
+
+        # Forcefield unique types for atoms, bonds, angles, torsion, and impropers
+        self._ff_types = dict(atoms=dict(), bonds=dict(), angles=(),
+                              torsions=dict(), impropers=())
+        # Forcefield atom weights, charges and equilibrium sizes (if given) for the structure
+        self._ff_sizes = dict(masses=dict(), charges=dict(),
+                              bonds=dict(), angles=dict(), torsions=dict())
 
     def _add_atom(self, atom_id, chain_id, atom_type, atom_coords):
         """
@@ -149,39 +156,29 @@ class PolymerSystem():
         charge_types : dict
             Dictionary of atom charges.
         """
-        if hasattr(self, '_charge_types'):
-            self.atom_charges.append(self._charge_types[atom_type])
-        atom_type = self._forcefield_types[atom_type]
-        self.atom_types[atom_id] = atom_type
+        if len(self._ff_sizes['charges']) != 0:
+            if atom_type in self._ff_sizes['charges']:
+                self.atom_charges.append(self._ff_sizes['charges'][atom_type])
+            else:
+                self.atom_charges.append(0)
+        atom_type = self._ff_types['atoms'][atom_type]
+        self.atom_types.append(atom_type)
         self.atoms.append([chain_id, atom_type, atom_coords])
 
-    def _add_bond(self, i, j):
+    def _add_bond(self, i, j, covalent=None):
         """
         Add a bond and its bond type.
 
         Parameters
         ----------
-        bonds : list
-            List to store the bonds.
-        bond_types : list
-            List to store the bond types.
         i : int
             Index of the first atom.
         j : int
             Index of the second atom.
-        atom_types : list
-            List of atom types.
         """
-        bond_type = self.__get_bond_type(i, j)
+        bond_type = self._get_bond_type(i, j, covalent)
+        self.bond_types.append(bond_type)
         self.bonds.append((bond_type, sorted([i, j])))
-
-    def __get_bond_type(self, i, j):
-        # Bond-types are either C-C (type 0) or C-H (type 1)
-        types = [0 if self.atom_types[k] != self._forcefield_types['H'] else 1
-                                                               for k in [i, j]]
-        if types not in self.bond_types:
-            self.bond_types.append(types)
-        return max(types)
 
     def _construct_bond_table(self):
         """
@@ -229,33 +226,8 @@ class PolymerSystem():
                 for k in bonded_to_j:
                     # Don't add angle twice.
                     if i < k:
-                        self.__add_angle([i, j, k])
-        self.angles = sorted(self.angles, key = lambda x: x[1])
-
-    def __add_angle(self, ijk):
-        """
-        Function for adding angles to the system.
-
-        Parameters
-        ----------
-        angles : list
-            List to store the angles.
-        angle_types : list
-            List to store the angle types.
-        ijk : list
-            List of three atom indices forming an angle.
-        atom_types : list
-            List of atom types.
-        """
-        types = [1 if self.atom_types[i] == self._forcefield_types['H']\
-                                                           else 0 for i in ijk]
-        # Accounts for ABC -> CBA symmetry of angle types.
-        if types[0] > types[2]:
-            types = types[::-1]
-            ijk = ijk[::-1]
-        if types not in self.angle_types:
-            self.angle_types.append(types)
-        self.angles.append((self.angle_types.index(types), ijk))
+                        self.angles.append(self._get_angle_type([i, j, k]))
+        self.angles = sorted(self.angles, key = lambda x: x[1][1])
 
     def _add_dihedrals(self):
         """
@@ -277,38 +249,8 @@ class PolymerSystem():
             for i in self.bond_table[j]:
                 for l in self.bond_table[k]:
                     if i != k and l != j:
-                        self.__add_dihedral([i,j,k,l])
-        self.dihedrals = sorted(self.dihedrals, key = lambda x: x[1])
-
-
-    def __add_dihedral(self, ijkl):
-        """
-        Function for adding dihedral torsion angles to the system.
-
-        Parameters
-        ----------
-        dihedrals : list
-            List to store the dihedrals.
-        dihedral_types : list
-            List to store the dihedral types.
-        ijkl : list
-            List of four atom indices forming a dihedral.
-        atom_types : list
-            List of atom types.
-        """
-        types = [1 if self.atom_types[i] == self._forcefield_types['H']\
-                                                          else 0 for i in ijkl]
-        # Possible dihedral types
-        # HCCH <=> HCCH
-        # CCCH <=> HCCC
-        # CCCC <=> CCCC
-        # NOTE: This is not general.
-        if types[0] > types[-1]:
-            ijkl = ijkl[::-1]
-            types = types[::-1]
-        if types not in self.dihedral_types:
-            self.dihedral_types.append(types)
-        self.dihedrals.append((self.dihedral_types.index(types), ijkl))
+                        self.dihedrals.append(self._get_dihedral_type([i, j, k, l]))
+        self.dihedrals = sorted(self.dihedrals, key = lambda x: x[1][1])
 
     def _add_impropers(self):
         """
@@ -336,36 +278,8 @@ class PolymerSystem():
                 for k in bonded_to_j:
                     for l in bonded_to_j:
                         if i < k and i < l and l < k:
-                            self.__add_improper([i, j, k, l])
-        self.impropers = sorted(self.impropers, key = lambda x: x[1])
-
-    def __add_improper(self, ijkl):
-        """
-        Function for adding improper angles to the system.
-
-        Parameters
-        ----------
-        ijkl : list of int
-            A list of four atom indices defining an improper angle.
-        atom_types : list of int
-            List of atom types.
-
-        Returns
-        -------
-        tuple
-            A tuple containing the improper angle defined by four atom indices and its type.
-        """
-        types = sorted([1 if self.atom_types[i] == self._forcefield_types['H']\
-                                                        else 0 for i in ijkl])
-        # Possible improper types
-        # CCCH <=> HCCC
-        # CCHH <=> HHCC
-        # CHHH <=> HHHC
-        # NOTE: This is not general.
-        if types not in self.improper_types:
-            self.improper_types.append(types)
-        if (self.improper_types.index(types), ijkl) not in self.impropers:
-            self.impropers.append((self.improper_types.index(types), ijkl))
+                            self.impropers.append(self._get_improper_type([i, j, k, l]))
+        self.impropers = sorted(self.impropers, key = lambda x: x[1][1])
 
     def _normalized(self, r):
         """

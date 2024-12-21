@@ -26,13 +26,15 @@ crystal_system(material, Ns, Na, Nb, Nc, potential_coeffs='compass',
     Placeholder function for generating crystalline polymer systems.
 """
 
+
 from generation.pe.amorphous.system import PEAmorphousSystem
 from generation.pe.crystalline.system import PECrystallineSystem
 from generation.pp.amorphous.system import PPAmorphousSystem
 from generation.pp.crystalline.system import PPCrystallineSystem
+from generation.pu.amorphous.system import PUAmorphousSystem
+from generation.bead_spring.system import BeadSpringSystem
 from generation.lib.potential_coefficients import potential_coefficients
 from generation.lib.lammps import write_data_file
-from generation.cg.system import BeadSpringSystem
 
 
 def generate(material, phase, resolution, settings, verbose=True):
@@ -59,18 +61,22 @@ def generate(material, phase, resolution, settings, verbose=True):
     This function generates the specified polymer system and writes it to a
     LAMMPS-format data file in the specified atom format.
     """
+    if verbose:
+        modification = settings['modification'].capitalize() if 'modification' in settings else ''
+        system = f'{resolution} {modification} {phase} {material}'
+        print(f'# Generating {settings["Ns"]} {system} system(s) ...')
 
-    if phase in ['Amorphous', 'amorphous']:
-        if resolution in ['AA', 'Aa', 'aa']:
+    if phase == 'Amorphous':
+        if resolution == 'AA':
             system = amorphous_aa_system(material, settings.copy(), verbose)
-        elif resolution in ['CG', 'Cg', 'cg']:
+        elif resolution == 'CG':
             system = amorphous_cg_system(material, settings.copy(), verbose)
         else:
             raise ValueError('Invalid resolution: {resolution}')
-    elif phase in ['Crystalline', 'crystalline']:
-        if resolution in ['AA', 'Aa', 'aa']:
+    elif phase == 'Crystalline':
+        if resolution == 'AA':
             system = crystalline_aa_system(material, settings.copy(), verbose)
-        elif resolution in ['CG', 'Cg', 'cg']:
+        elif resolution == 'CG':
             system = crystalline_cg_system(material, settings.copy(), verbose)
     else:
         raise ValueError('Invalid phase: {phase}')
@@ -99,17 +105,25 @@ def amorphous_aa_system(material, settings, verbose):
         Class 2 forcefield coefficients of COMPASS or PCFF for the specified material.
     """
     required = ['Ns', 'Nc', 'Nm']
-    key_types = {'Ns': int, 'Nc': int, 'Nm': int, 'potential_coeffs': str, 'atoms_format': str}
-    value_constraints = {'Ns': lambda x: x > 0, 'Nc': lambda x: x > 0, 'Nm': lambda x: x > 0}
-    defaults = dict(atoms_format='full', random_variation=True)
+    defaults = {'atoms_format': 'full', 'random_variation': True}
+    # Number of repetitions of soft segment (Liu 2019) for PU
+    if material == 'PU':
+        required += ['Nss']
+        defaults['Nss'] = 1
+    key_types = {'Ns': int, 'Nc': int, 'Nm': int, 'Nss': int, 'potential_coeffs': str,
+                 'atoms_format': str}
+    value_constraints = {'Ns': lambda x: x > 0, 'Nc': lambda x: x > 0,
+                         'Nm': lambda x: x > 0, 'Nss': lambda x: x > 0}
     # Validate the input settings
     settings = validate_settings(settings, required, key_types, value_constraints, defaults)
 
     for ns in range(settings['Ns']):
-        if material in ['PE', 'Pe', 'pe']:
+        if material == 'PE':
             system = PEAmorphousSystem(settings)
-        elif material in ['PP', 'Pp', 'pp']:
+        elif material == 'PP':
             system = PPAmorphousSystem(settings)
+        elif material == 'PU':
+            system = PUAmorphousSystem(settings)
         else:
             raise ValueError('Not implemented material: {material}')
         # Specified forcefield potential coefficients for the material
@@ -118,7 +132,7 @@ def amorphous_aa_system(material, settings, verbose):
                                                   settings['potential_coeffs'])
         system.resolution = 'AA'
         system.atoms_format = settings['atoms_format']
-        system.output = f'aa_{material}_{settings["Nm"]}m{settings["Nc"]}c_{ns+1:02d}.lammps'
+        system.output = f'aa_{material}_{settings["Nm"]}m{settings["Nc"]}c_{ns+1:02d}'
         # Write the system into a file
         write_data_file(system)
         if verbose:
@@ -163,7 +177,7 @@ def amorphous_cg_system(material, settings, verbose):
     # Generate n random system with the given properties
     for ns in range(settings['Ns']):
         system = BeadSpringSystem(settings)
-        system.output = f'cg_{material}_{settings["Nm"]}m{settings["Nc"]}c_{ns+1:02d}.lammps'
+        system.output = f'cg_{material}_{settings["Nm"]}m{settings["Nc"]}c_{ns+1:02d}'
         # Write the system into a file
         system.material = material
         system.resolution = 'CG'
@@ -211,10 +225,10 @@ def crystalline_aa_system(material, settings, verbose):
     settings = validate_settings(settings, required, key_types, value_constraints, defaults)
 
     for ns in range(settings['Ns']):
-        if material in ['PE', 'Pe', 'pe']:
+        if material == 'PE':
             system = PECrystallineSystem(settings)
             modification = ''
-        elif material in ['PP', 'Pp', 'pp']:
+        elif material == 'PP':
             system = PPCrystallineSystem(settings)
             modification = f'{settings["modification"]}_'
         else:
@@ -227,11 +241,11 @@ def crystalline_aa_system(material, settings, verbose):
         system.atoms_format = settings['atoms_format']
         system.output = f'aa_{material}_{modification}'\
                         f'a{settings["Na"]}b{settings["Nb"]}c{settings["Nc"]}_'\
-                        f'{ns+1:02d}.lammps'
+                        f'{ns+1:02d}'
         # Write the system into a file
         write_data_file(system)
         if verbose:
-            verbose_aa_details('Crystalline', ns, system)
+            verbose_aa_details('Crystalline', ns+1, system)
     return system
 
 
@@ -278,31 +292,60 @@ def validate_settings(settings, required_keys, key_types, value_constraints, def
 
 def verbose_aa_details(phase, ns, system):
     # Show the system properties on the screen
-    print(f'# Generated {system.resolution} {phase} {system.material} system {ns+1} ...')
-    name = {0: 'C', 1: 'H'}
-    atom_types = {a: t + 1 for a, t in system._forcefield_types.items()}
-    print(f'---- {system.Nt:>4d} atoms of types:\t{atom_types}')
-    bond_types = {name[a[0]]+name[a[1]]: i + 1
-                                      for i, a in enumerate(system.bond_types)}
-    print(f'---- {len(system.bonds):>4d} bonds of types:\t{bond_types}')
+    modification = system.modification.capitalize() if hasattr(system, 'modification') else ''
+    print(f'-- Generated {system.resolution} {modification} {phase} {system.material} system {ns+1}')
+    if system.material == 'PU':
+        types = forcefield_atom_types_equivalence(system.potential_coeffs)
+    else:
+        types = system._ff_types['atoms']
+    name = {}
+    for a, t in types.items():
+        if a[0].upper() == a[0]:
+            if a[0] not in name.values():
+                name[len(name)] = a[0]
+        else:
+            name[t] = a
+    atom_types = {a: t + 1 for a, t in types.items()}
+    # Space between lines for better clarity
+    s = '\n' if len(atom_types) > 5 else ''
+    print(f'---- {system.Nt:>4d} atoms of types:\t{atom_types}{s}')
+    bond_types = {b: t + 1 for b, t in system._ff_types['bonds'].items()}
+    print(f'---- {len(system.bonds):>4d} bonds of types:\t{bond_types}{s}')
+    if system.material == 'PU' and system.potential_coeffs.upper() == 'PCFF':
+        name = forcefield_atom_types_equivalence(None, True)
     if system.angles:
-        angle_types = {name[a[0]]+name[a[1]]+name[a[2]]: i + 1
+        angle_types = {f'{name[a[0]]}-{name[a[1]]}-{name[a[2]]}': i + 1
                                      for i, a in enumerate(system.angle_types)}
-        print(f'---- {len(system.angles):>4d} angles of types:\t{angle_types}')
+        print(f'---- {len(system.angles):>4d} angles of types:\t{angle_types}{s}')
     if system.dihedrals:
-        dihedral_types = {name[a[0]]+name[a[1]]+name[a[2]]+name[a[3]]: i + 1
+        dihedral_types = {f'{name[a[0]]}-{name[a[1]]}-{name[a[2]]}-{name[a[3]]}': i + 1
                           for i, a in enumerate(system.dihedral_types)}
-        print(f'---- {len(system.dihedrals):>4d} dihedrals of types:\t{dihedral_types}')
+        print(f'---- {len(system.dihedrals):>4d} dihedrals of types:\t{dihedral_types}{s}')
     if system.impropers:
-        improper_types = {name[a[0]]+name[a[1]]+name[a[2]]+name[a[3]]: i + 1
+        improper_types = {f'{name[a[0]]}-{name[a[1]]}-{name[a[2]]}-{name[a[3]]}': i + 1
                                   for i, a in enumerate(system.improper_types)}
-        print(f'---- {len(system.impropers):>4d} impropers of types:\t{improper_types}')
-    print(f'---- Output: {system.output}\n')
+        print(f'---- {len(system.impropers):>4d} impropers of types:\t{improper_types}{s}')
+    print(f'---- Output: {system.output}.lammps\n')
+
+
+def forcefield_atom_types_equivalence(args, equivalences=False):
+    """
+    Convert the type symbol and ID from PCFF to COMPASS and vice versa.
+    """
+    compass2pcff = { 'c4':  'c2',  'c4o': 'c_0', "c3'": 'c_1', 'c3"': 'c_2',
+                    'c3a':  'cp',  'n3m': 'n_2', 'o1=': 'o_1', 'o2e':  'oh',
+                    'o2s': 'o_2',   'h1':  'hc', 'h1n': 'hn2', 'h1o':  'ho'}
+    if equivalences:
+        return compass2pcff
+    if args.upper() == 'PCFF':
+        return {pcff: idx for idx, (compass, pcff) in enumerate(compass2pcff.items())}
+    else:
+        return {compass: idx for idx, (compass, pcff) in enumerate(compass2pcff.items())}
 
 
 def verbose_cg_details(phase, ns, system):
     """ Show the details of the system on the screen in verbose mode. """
-    print(f'# Generated {system.resolution} {phase} {system.material} system {ns+1} ...')
+    print(f'-- Generated {system.resolution} {phase} {system.material} system {ns+1} ...')
     masses = {b[0]: b[1] for t, b in sorted(system.atom_types.items())}
     masses['System'] = round(system.mass, 3)
     print(f'{"Masses":>10}: {masses} (g/mol)')
@@ -334,5 +377,5 @@ def verbose_cg_details(phase, ns, system):
                              for t, n in sorted(system.improper_types.items())}
         impropers['Total'] = len(system.impropers)
         print(f'{"Impropers":>10}: {impropers}')
-    print(f'{"Output":>10}: {system.output}\n')
+    print(f'{"Output":>10}: {system.output}.lammps\n')
 
